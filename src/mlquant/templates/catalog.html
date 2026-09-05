@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}因子目录 · MLQuant{% endblock %}
+{% block content %}
+<section class="hero">
+  <div><p class="eyebrow">POINT-IN-TIME FACTOR REGISTRY</p><h1>公式化因子目录</h1>
+  <p>定义、版本、数据依赖和研究证据集中管理。表现不决定因子是否存在。</p></div>
+  <a class="button primary" href="/factors/new">新建因子</a>
+</section>
+<section class="filter-panel" aria-label="因子筛选">
+  <form class="search-row" method="get">
+    <label class="family-select-label"><span>因子大类</span>
+      <select name="family" aria-label="选择因子大类">
+        <option value="">全部大类（{{ total_count }}）</option>
+        {% for item in family_items %}
+          <option value="{{ item.id }}" {% if item.id==selected_family %}selected{% endif %}>{{ item.label }}（{{ item.count }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="factor-search-label"><span>搜索</span>
+      <input type="search" name="q" value="{{ query }}" aria-label="搜索因子"
+             placeholder="名称、简介或经济假设">
+    </label>
+    <button type="submit">筛选</button>
+    {% if query or selected_family %}<a class="button quiet" href="/">重置</a>{% endif %}
+  </form>
+</section>
+<section class="stats"><div><strong>{{ total_filtered }}</strong><span>当前结果（共 {{ total_count }} 个）</span></div>
+<div><strong>{{ family_count }}</strong><span>因子大类</span></div>
+<div><strong>DSL</strong><span>统一执行语言</span></div></section>
+<div class="table-wrap"><table><thead><tr><th>因子</th><th>大类</th><th>假设</th><th>公式</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody>
+{% for factor in factors %}<tr><td><a href="/factors/{{ factor.factor_id }}"><strong>{{ factor.name }}</strong></a><small>{{ factor.description }}</small></td>
+<td><span class="pill">{{ factor.family }}</span></td><td>{{ factor.hypothesis_id }}</td><td><code>{{ factor.formula_source }}</code></td>
+<td>r{{ factor.revision_number }}</td><td><span class="status {{ factor.status }}">{{ factor.status }}</span></td>
+<td><form class="quick-run-form" method="post" action="/runs/quick"><input type="hidden" name="factor_id" value="{{ factor.factor_id }}"><button class="button backtest-button" type="submit">一键回测</button></form></td></tr>{% endfor %}
+</tbody></table></div>
+{% if pages > 1 %}<div class="pagination">
+{% if page > 1 %}<a class="button quiet" href="?family={{ selected_family }}&q={{ query | urlencode }}&page={{ page - 1 }}">上一页</a>{% endif %}
+<span>第 {{ page }} / {{ pages }} 页 · 共 {{ total_filtered }} 个因子</span>
+{% if page < pages %}<a class="button quiet" href="?family={{ selected_family }}&q={{ query | urlencode }}&page={{ page + 1 }}">下一页</a>{% endif %}
+</div>{% endif %}
+{% endblock %}

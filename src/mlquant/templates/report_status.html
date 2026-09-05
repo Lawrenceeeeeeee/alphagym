@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ report.name }} · 计算中 · MLQuant{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <p class="eyebrow">RESEARCH REPORT · COMPUTING</p>
+    <h1>{{ report.name }}</h1>
+    <p><span class="status {{ report.status }}">{{ report.status | status_zh }}</span> · <span id="progress-text">{{ (report.progress*100)|round|int }}%</span></p>
+  </div>
+  <a class="button" href="/reports">返回报告区</a>
+</section>
+{% if report.error %}<div class="alert" id="error-alert">{{ report.error | friendly }}</div>{% endif %}
+<section class="panel">
+  <h2>计算进度</h2>
+  <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width: {{ (report.progress*100)|round|int }}%"></div></div>
+  <p class="muted">报告在后台离线计算：数据校验 → 构建面板与回测 → 相关矩阵 → 合成对比 → 渲染研报。本页自动刷新，完成后直接展示报告。</p>
+  {% if report.run_id %}<p class="muted">关联回测 run：<a href="/runs/{{ report.run_id }}"><code>{{ report.run_id }}</code></a> · 创建于 {{ report.created_at | bjt }}</p>{% endif %}
+</section>
+<script>
+(function () {
+  var reportId = "{{ report.report_id }}";
+  // 页面服务端渲染已经携带终态（含错误信息），无需再轮询，避免失败页无限刷新。
+  if (["succeeded", "failed", "cancelled"].indexOf("{{ report.status }}") >= 0) return;
+  function showError(text) {
+    var alert = document.getElementById("error-alert");
+    if (alert) { alert.textContent = text; return; }
+    var created = document.createElement("div");
+    created.className = "alert";
+    created.id = "error-alert";
+    created.textContent = text;
+    document.querySelector("main").prepend(created);
+  }
+  function poll() {
+    fetch("/api/reports/" + reportId + "/status")
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        var percent = Math.round((data.progress || 0) * 100);
+        document.getElementById("progress-text").textContent = percent + "%";
+        document.getElementById("progress-fill").style.width = percent + "%";
+        if (data.status === "succeeded") { window.location.href = "/reports/" + reportId + "/view"; return; }
+        if (["failed", "cancelled"].indexOf(data.status) >= 0) {
+          if (data.error) showError(data.error);
+          // 刷新一次即可由服务端渲染终态；终态页面不会再次轮询。
+          window.location.reload();
+          return;
+        }
+        setTimeout(poll, 3000);
+      })
+      .catch(function () { setTimeout(poll, 8000); });
+  }
+  setTimeout(poll, 2500);
+})();
+</script>
+<style>
+.progress-track { background: #e4e8e2; border-radius: 999px; height: 12px; overflow: hidden; }
+.progress-fill { background: #27835b; height: 100%; transition: width .6s ease; }
+</style>
+{% endblock %}

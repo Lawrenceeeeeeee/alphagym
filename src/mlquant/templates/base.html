@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}MLQuant 因子库{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/factor-library.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/catalog-filters.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/factor-detail.css') }}">
+  <script src="{{ url_for('static', path='/echarts.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='/charts.js') }}" defer></script>
+  <script src="{{ url_for('static', path='/sortable-tables.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span>MLQ</span> 因子库</a>
+    <nav>
+      <a href="/" class="{{ 'active' if page in ('catalog.html', 'factor_detail.html', 'factor_form.html') else '' }}">因子</a>
+      <a href="/compare" class="{{ 'active' if page == 'compare.html' else '' }}">对比</a>
+      <a href="/reports" class="{{ 'active' if page in ('reports.html', 'report_new.html', 'report_status.html') else '' }}">报告区</a>
+      <a href="/runs" class="{{ 'active' if page in ('runs.html', 'run_detail.html') else '' }}">研究任务</a>
+      <a href="/operators" class="{{ 'active' if page == 'capabilities.html' and title == '算子目录' else '' }}">算子</a>
+      <a href="/fields" class="{{ 'active' if page == 'capabilities.html' and title == '字段目录' else '' }}">字段</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

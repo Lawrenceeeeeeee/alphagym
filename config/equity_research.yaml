@@ -1,0 +1,23 @@
+data_root: null
+indices: ["000300.SH", "000905.SH", "000852.SH"]
+periods:
+  development: ["2014-01-01", "2020-12-31"]
+  validation: ["2021-01-01", "2023-12-31"]
+  test: ["2024-01-01", "2025-12-31"]
+signal_frequency: month_end
+execution: next_trading_day_open
+portfolio:
+  initial_cash: 100000000
+  lot_size: 100
+  commission_bps: 3
+  slippage_bps: 5
+  stress_slippage_bps: 10
+combine:
+  lookback_months: 12
+  half_life_months: 6
+  methods: [equal, factor_return_decay, ic_decay, max_icir, max_ic, pca]
+fees:
+  policy_source:
+    stamp_tax: "https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm"
+    transfer_fee: "https://www.chinaclear.cn/zdjs/xtzgg/202204/5d1f6074e7f7459a93659b537c4e16a6.shtml"
+

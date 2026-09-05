@@ -1,0 +1,284 @@
+.research-metrics > h2 {
+  margin-bottom: 18px;
+}
+
+.metric-run {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  background: #fbfbf7;
+}
+
+.metric-run > summary,
+.metric-variant > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 16px;
+  color: var(--green);
+  font-weight: 700;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.metric-run[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.metric-run-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.metric-run-meta a {
+  margin-left: 8px;
+}
+
+.metric-run-body {
+  padding: 16px;
+}
+
+.metric-index + .metric-index {
+  margin-top: 22px;
+}
+
+.metric-index h3 {
+  margin: 0 0 10px;
+  font: 20px Georgia, "Noto Serif SC", serif;
+}
+
+.metric-variant {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+.metric-variant[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.period-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+
+.metric-period-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-top: 4px solid #8a9b92;
+  background: #fffefb;
+}
+
+.metric-period-card.period-development { border-top-color: #667f70; }
+.metric-period-card.period-validation { border-top-color: #b68a3b; }
+.metric-period-card.period-test { border-top-color: var(--accent); }
+.metric-period-card.period-monitoring_2026 { border-top-color: #6d6a91; }
+.metric-period-card.period-all { border-top-color: var(--green); }
+
+.metric-period-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.metric-period-card h4 {
+  margin: 0;
+  font: 19px Georgia, "Noto Serif SC", serif;
+}
+
+.metric-period-card header span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.metric-item {
+  min-width: 0;
+  padding: 11px 13px;
+  border-right: 1px solid #e9ece7;
+  border-bottom: 1px solid #e9ece7;
+}
+
+.metric-item:nth-child(even) {
+  border-right: 0;
+}
+
+.metric-item dt {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-item dd {
+  margin: 3px 0 0;
+  color: var(--green);
+  font: 20px Georgia, serif;
+}
+
+.metric-item dd.negative {
+  color: var(--accent);
+}
+
+.layered-backtest {
+  margin: 0 14px 16px;
+  border-top: 3px solid var(--green);
+  background: #fffefb;
+}
+
+.layered-backtest-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 17px 18px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.layered-backtest-heading h4 {
+  margin: 0;
+  font: 20px Georgia, "Noto Serif SC", serif;
+}
+
+.layered-backtest-heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.layered-backtest-heading > span {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  background: var(--soft);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.layered-chart {
+  margin: 0;
+  padding: 14px 16px 8px;
+}
+
+.layered-chart img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.layered-periods {
+  padding: 4px 16px 16px;
+}
+
+.layered-period {
+  border-top: 1px solid var(--line);
+}
+
+.layered-period > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 2px;
+  color: var(--green);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.layered-period > summary small {
+  display: inline;
+  font-weight: 500;
+}
+
+.layered-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+}
+
+.layered-table {
+  min-width: 920px;
+  font-size: 13px;
+}
+
+.layered-table th,
+.layered-table td {
+  padding: 10px 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.layered-table thead th:first-child,
+.layered-table tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 150px;
+  text-align: left;
+}
+
+.layered-table thead th:first-child {
+  z-index: 2;
+  background: #e9ece7;
+}
+
+.layered-table tbody th {
+  background: #fffefb;
+  color: var(--ink);
+}
+
+.layered-table tbody tr.portfolio-group_1 th {
+  color: #a52e1e;
+}
+
+.layered-table tbody tr.portfolio-group_5 th {
+  color: var(--green);
+}
+
+.layered-table tbody tr.portfolio-benchmark th,
+.layered-table tbody tr.portfolio-long_short th {
+  font-weight: 800;
+}
+
+.layered-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.layered-table td.negative {
+  color: var(--accent);
+}
+
+@media (max-width: 800px) {
+  .metric-run > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .period-grid {
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+
+  .layered-backtest {
+    margin: 0 10px 12px;
+  }
+
+  .layered-backtest-heading {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .layered-chart {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+}
