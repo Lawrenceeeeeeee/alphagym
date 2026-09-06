@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.factor_cache import FactorValueCache, universe_key
 from mlquant.factor_store import FactorStore
 from mlquant.factors.base import FactorContext, FactorRegistry, FactorSpec
@@ -146,7 +147,7 @@ class FactorResearchService:
         daily_path = root / "equity" / "daily.parquet"
         adjustments_path = root / "equity" / "adjustments.parquet"
         missing: list[str] = []
-        if not daily_path.is_file():
+        if not storage_io.exists(daily_path):
             missing.append("A股日线行情尚未入库（equity/daily.parquet）")
             daily_columns: set[str] = set()
         else:
@@ -155,7 +156,7 @@ class FactorResearchService:
         financial_fields = [item for item in required_fields if item.startswith("financial.")]
         fundamentals_path = root / "equity" / "fundamentals.parquet"
         if financial_fields:
-            if not fundamentals_path.is_file():
+            if not storage_io.exists(fundamentals_path):
                 missing.append("财务数据：" + "、".join(financial_fields))
             else:
                 columns = self._parquet_columns(fundamentals_path)
@@ -170,7 +171,7 @@ class FactorResearchService:
         adjusted_required = any(
             self.store.fields.get(item).column.startswith("adj_") for item in market_fields
         )
-        if adjusted_required and not adjustments_path.is_file():
+        if adjusted_required and not storage_io.exists(adjustments_path):
             missing.append("后复权因子尚未入库（equity/adjustments.parquet）")
         derived = {
             "adj_open", "adj_high", "adj_low", "adj_close", "market_return",
@@ -183,7 +184,7 @@ class FactorResearchService:
         if absent_market:
             missing.append("行情字段：" + "、".join(absent_market))
 
-        if index_code != "ALL_A" and not (root / "equity" / "index_members.parquet").is_file():
+        if index_code != "ALL_A" and not storage_io.exists(root / "equity" / "index_members.parquet"):
             missing.append(f"{index_code} 的历史成分数据")
         # The automatic factor backtest runs raw-value five-group portfolios
         # without industry layering or neutralization, so formal validation is the
@@ -203,6 +204,7 @@ class FactorResearchService:
             "data_root": str(root),
         }
 
+    @storage_io.freeze_market
     def execute_auto_run(self, run_id: str) -> Path:
         """Build a reproducible panel from registered inputs, then evaluate it."""
         run = self.store.run_detail(run_id)
@@ -224,7 +226,7 @@ class FactorResearchService:
             panel_dir = self._data_root() / "factor_library" / "generated_panels"
             panel_dir.mkdir(parents=True, exist_ok=True)
             panel_path = panel_dir / f"{run_id}.parquet"
-            panel.to_parquet(panel_path, index=False)
+            storage_io.write_frame(panel, panel_path, index=False)
             output = self.execute_panel_run(run_id, panel_path)
             self.store.add_artifact(run_id, panel_path, "factor_values")
             return output
@@ -257,8 +259,8 @@ class FactorResearchService:
         )
         fundamentals_path = root / "equity" / "fundamentals.parquet"
         fundamentals = (
-            pd.read_parquet(fundamentals_path)
-            if fundamentals_path.is_file()
+            storage_io.read_frame(fundamentals_path)
+            if storage_io.exists(fundamentals_path)
             else pd.DataFrame(columns=["symbol", "stat_date", "available_date"])
         )
         for column in ("stat_date", "available_date"):
@@ -546,17 +548,17 @@ class FactorResearchService:
             requested.add(column.removeprefix("adj_"))
         columns = sorted(requested & available)
         try:
-            daily = pd.read_parquet(
+            daily = storage_io.read_frame(
                 daily_path,
                 columns=columns,
                 filters=[("trade_date", ">=", start), ("trade_date", "<=", end)],
             )
         except (TypeError, ValueError):
-            daily = pd.read_parquet(daily_path, columns=columns)
+            daily = storage_io.read_frame(daily_path, columns=columns)
             daily["trade_date"] = pd.to_datetime(daily["trade_date"]).dt.normalize()
             daily = daily[daily["trade_date"].between(start, end)]
         daily["trade_date"] = pd.to_datetime(daily["trade_date"]).dt.normalize()
-        adjustments = pd.read_parquet(
+        adjustments = storage_io.read_frame(
             adjustments_path, columns=["trade_date", "symbol", "adjust_factor"]
         )
         adjustments["trade_date"] = pd.to_datetime(adjustments["trade_date"]).dt.normalize()
@@ -582,7 +584,7 @@ class FactorResearchService:
     def _load_members(root: Path, index_code: str) -> pd.DataFrame:
         if index_code == "ALL_A":
             return pd.DataFrame()
-        frame = pd.read_parquet(root / "equity" / "index_members.parquet")
+        frame = storage_io.read_frame(root / "equity" / "index_members.parquet")
         for column in ("valid_from", "valid_to"):
             frame[column] = pd.to_datetime(frame[column]).dt.normalize()
         return frame[frame["index_code"] == index_code]
@@ -593,9 +595,9 @@ class FactorResearchService:
         if not (filters.get("include") or filters.get("exclude")):
             return None
         path = root / "equity" / "industries.parquet"
-        if not path.is_file():
+        if not storage_io.exists(path):
             raise AutoRunDataError("行业筛选需要 equity/industries.parquet（申万行业点位历史）")
-        frame = pd.read_parquet(
+        frame = storage_io.read_frame(
             path, columns=["symbol", "industry_code", "valid_from", "valid_to"]
         )
         for column in ("valid_from", "valid_to"):
@@ -687,9 +689,8 @@ class FactorResearchService:
 
     @staticmethod
     def _parquet_columns(path: Path) -> set[str]:
-        import pyarrow.parquet as pq
 
-        return set(pq.ParquetFile(path).schema_arrow.names)
+        return set(storage_io.TableReader(path).schema_arrow.names)
 
     @staticmethod
     def _run_periods(
@@ -712,7 +713,7 @@ class FactorResearchService:
         panel_path = Path(panel_path).expanduser().resolve()
         self.store.set_run_status(run_id, "running", progress=0.05)
         try:
-            panel = pd.read_parquet(panel_path)
+            panel = storage_io.read_frame(panel_path)
             self._validate_panel(panel, run)
             selected = {item["factor_id"] for item in run["factors"]}
             panel = panel[panel["factor_name"].isin(selected)].copy()
@@ -742,8 +743,8 @@ class FactorResearchService:
             monthly_path = output / "monthly.parquet"
             summary_path = output / "summary.csv"
             manifest_path = output / "manifest.json"
-            monthly_all.to_parquet(monthly_path, index=False)
-            summary_all.to_csv(summary_path, index=False)
+            storage_io.write_frame(monthly_all, monthly_path, index=False)
+            storage_io.write_csv(summary_all, summary_path, index=False)
             manifest = {
                 "run_id": run_id,
                 "mode": run["mode"],
@@ -753,7 +754,7 @@ class FactorResearchService:
                 "config": run["config"],
                 "monitoring_2026_excluded_from_selection": True,
             }
-            manifest_path.write_text(
+            storage_io.write_text(manifest_path,
                 json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
@@ -913,8 +914,8 @@ class FactorResearchService:
         nav, performance = self._layered_frames(monthly)
         nav_path = output / "layered_nav.parquet"
         performance_path = output / "layered_performance.parquet"
-        nav.to_parquet(nav_path, index=False)
-        performance.to_parquet(performance_path, index=False)
+        storage_io.write_frame(nav, nav_path, index=False)
+        storage_io.write_frame(performance, performance_path, index=False)
         return nav_path, performance_path
 
     def rebuild_layered_backtest(self, run_id: str) -> tuple[Path, Path]:
@@ -929,7 +930,7 @@ class FactorResearchService:
         )
         if monthly_artifact is None:
             raise ValueError("run has no monthly statistics artifact")
-        monthly = pd.read_parquet(monthly_artifact["path"])
+        monthly = storage_io.read_frame(monthly_artifact["path"])
         for index_code, sample in monthly.groupby("index_code", observed=True, dropna=False):
             self.store.write_metrics(
                 run_id, self._portfolio_metrics(sample, str(index_code))

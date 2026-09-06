@@ -1,0 +1,9 @@
+clickhouse:
+  host: localhost
+  port: 8123
+  username: mlquant
+  database: mlquant
+  workspace: research
+  secure: false
+# Save as <root>/storage.yaml. Password: MLQUANT_CLICKHOUSE_PASSWORD.
+# Preserve workspace when moving the root or restoring on another server.

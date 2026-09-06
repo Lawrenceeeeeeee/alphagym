@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
 import pandas as pd
+
+from mlquant import storage_io
 
 
 class DataContractError(ValueError):
@@ -66,24 +67,24 @@ class EquityDataBundle:
 
     @classmethod
     def from_root(cls, root: str | Path | None = None) -> EquityDataBundle:
-        data_root = Path(root or os.environ.get("MLQUANT_DATA_ROOT", "")).expanduser()
-        if not str(data_root):
-            raise DataContractError("data root is required via --root or MLQUANT_DATA_ROOT")
-        if not data_root.exists():
+        from mlquant.config import resolve_root
+
+        data_root = resolve_root(root)
+        if not storage_io.exists(data_root):
             raise DataContractError(f"data root does not exist: {data_root}")
 
         tables: dict[str, pd.DataFrame] = {}
         for name in cls.TABLES:
             path = data_root / "equity" / f"{name}.parquet"
-            if not path.exists():
+            if not storage_io.exists(path):
                 tables[name] = pd.DataFrame(columns=SCHEMAS[name])
                 continue
-            frame = pd.read_parquet(path)
+            frame = storage_io.read_frame(path)
             for column in DATE_COLUMNS.intersection(frame.columns):
                 frame[column] = pd.to_datetime(frame[column]).dt.normalize()
             tables[name] = frame
         meta_path = data_root / "equity" / "metadata.json"
-        metadata = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        metadata = json.loads(storage_io.read_text(meta_path, encoding="utf-8")) if storage_io.exists(meta_path) else {}
         return cls(**tables, metadata=metadata)
 
     def audit(self, *, formal: bool = True, index_code: str | None = None) -> AuditResult:
@@ -207,17 +208,17 @@ class EquityDataBundle:
         manifest: dict[str, object] = {"formal": formal, "tables": {}}
         for name in self.TABLES:
             path = target / f"{name}.parquet"
-            getattr(self, name).to_parquet(path, index=False)
+            storage_io.write_frame(getattr(self, name), path, index=False)
             manifest["tables"][name] = {
                 "rows": len(getattr(self, name)),
                 "sha256": sha256_file(path),
             }
-        (target / "metadata.json").write_text(
+        storage_io.write_text(target / "metadata.json",
             json.dumps({**self.metadata, "formal": formal}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         manifest_path = target / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        storage_io.write_text(manifest_path, json.dumps(manifest, indent=2), encoding="utf-8")
         return manifest_path
 
 
@@ -260,8 +261,4 @@ def read_qmt_daily_dat(path: str | Path, symbol: str) -> pd.DataFrame:
 
 
 def sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return hashlib.sha256(storage_io.read_bytes(path)).hexdigest()

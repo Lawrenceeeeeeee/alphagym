@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
+import logging
+import sqlite3
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import yaml
+from clickhouse_connect.driver.exceptions import ClickHouseError
 
-from mlquant.adapters import QmtDailyAdapter, QmtDividendAdapter
+from mlquant import storage_io
+from mlquant.api import Workspace
 from mlquant.combine import METHODS, factor_weights
-from mlquant.equity_data import DataContractError, EquityDataBundle
+from mlquant.config import resolve_root
+from mlquant.equity_data import EquityDataBundle
 from mlquant.factor_cache import FactorValueCache, build_factor_cache
 from mlquant.factor_research_service import FactorResearchService
 from mlquant.factor_store import FactorStore
@@ -23,6 +25,8 @@ from mlquant.factors import REGISTRY
 from mlquant.factors.base import FactorDefinition
 from mlquant.factors.compute import compute_factors
 from mlquant.factors.library import seed_definitions
+from mlquant.ingest import import_qmt
+from mlquant.optional import OptionalDependencyError, require
 from mlquant.report_engine import ReportEngine
 from mlquant.report_spec import (
     FactorSelection,
@@ -33,86 +37,107 @@ from mlquant.report_spec import (
 )
 from mlquant.reporting import build_series
 from mlquant.research import evaluate_factor_batch
+from mlquant.serialization import dumps
+from mlquant.services import create_report
 from mlquant.signal_export import export_signal
 
 
 def _root(value: str | None) -> Path:
-    resolved = value or os.environ.get("MLQUANT_DATA_ROOT")
-    if not resolved:
-        raise DataContractError("--root or MLQUANT_DATA_ROOT is required")
-    return Path(resolved).expanduser().resolve()
+    return resolve_root(value)
 
 
 def _emit(args: argparse.Namespace, value: object) -> None:
     if getattr(args, "json", False):
-        print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+        print(dumps(value))
     else:
         print(value)
+
+
+def _emit_task_result(args, row, keys) -> int:
+    result = {key: row.get(key) for key in keys}
+    result["ok"] = row["status"] == "succeeded"
+    result["error"] = None if result["ok"] else {
+        "code": "TaskFailed" if row["status"] == "failed" else "TaskCancelled",
+        "message": row.get("error") or f"Task {row['status']}",
+    }
+    _emit(args, result)
+    return 0 if result["ok"] else 1
 
 
 def _cmd_data_audit(args: argparse.Namespace) -> int:
     bundle = EquityDataBundle.from_root(_root(args.root))
     result = bundle.audit(formal=not args.smoke, index_code=args.index)
-    print(json.dumps({"ok": result.ok, "errors": result.errors, "warnings": result.warnings, "rows": result.rows}, ensure_ascii=False, indent=2))
-    return 0 if result.ok else 2
+    payload = {"ok": result.ok, "errors": result.errors, "warnings": result.warnings,
+               "rows": result.rows}
+    if not result.ok:
+        payload["error"] = {"code": "DataContractError", "message": "; ".join(result.errors)}
+    _emit(args, payload)
+    return 0 if result.ok else 1
 
 
 def _cmd_snapshot(args: argparse.Namespace) -> int:
     bundle = EquityDataBundle.from_root(_root(args.root))
-    print(bundle.build_snapshot(args.destination, formal=not args.smoke))
+    _emit(args, {"path": str(bundle.build_snapshot(args.destination, formal=not args.smoke))})
     return 0
 
 
 def _cmd_import_qmt(args: argparse.Namespace) -> int:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
-    datadir = Path(args.datadir).expanduser().resolve()
-    if not datadir.is_dir():
-        raise DataContractError(f"QMT datadir not found: {datadir}")
-    target = _root(args.root) / "equity"
-    target.mkdir(parents=True, exist_ok=True)
-    adjustment_path = target / "adjustments.parquet"
-    adjustment_temp = target / "adjustments.parquet.tmp"
-    QmtDividendAdapter(datadir).read().to_parquet(adjustment_temp, index=False)
-    adjustment_temp.replace(adjustment_path)
-    daily = QmtDailyAdapter(datadir)
-    symbols = daily.symbols()
-    daily_path = target / "daily.parquet"
-    daily_temp = target / "daily.parquet.tmp"
-    writer = None
-    for start in range(0, len(symbols), 500):
-        frame = daily.read(symbols[start : start + 500])
-        if frame.empty:
-            continue
-        table = pa.Table.from_pandas(frame)
-        if writer is None:
-            writer = pq.ParquetWriter(daily_temp, table.schema)
-        writer.write_table(table)
-    if writer is not None:
-        writer.close()
-        daily_temp.replace(daily_path)
-    print(target)
+    result = import_qmt(args.datadir, _root(args.root))
     if not args.no_refresh_factor_cache:
-        # An incremental price/volume update changes the data signature, which
-        # invalidates the whole factor-value cache; rebuild it in the
-        # background so backtests stay fast and point-in-time correct.
         _spawn_cache_build(_root(args.root), "--all")
+    _emit(args, result)
+    return 0
+
+
+def _cmd_import_parquet(args):
+    from mlquant.ingest import import_parquet
+
+    _emit(args, import_parquet(args.input, args.table, _root(args.root), mode=args.mode))
+    return 0
+
+
+def _cmd_sync_tushare(args):
+    from mlquant.tushare_import import sync_tushare
+
+    _emit(args, sync_tushare(_root(args.root), token=args.token, start=args.start,
+                            end=args.end, dataset=args.dataset, rate_limit=args.rate_limit,
+                            overlap_days=args.overlap_days, daily_basic=not args.no_daily_basic,
+                            symbols=args.symbol))
+    return 0
+
+
+def _cmd_storage(args):
+    from mlquant.migration import migrate_workspace
+    from mlquant.storage_io import store_for
+
+    root = _root(args.root)
+    if args.storage_command == "migrate":
+        result = migrate_workspace(args.source, root)
+    elif args.storage_command == "backup":
+        from mlquant.database_admin import backup_database
+
+        result = backup_database(root, args.name, base=args.base)
+    elif args.storage_command == "restore":
+        from mlquant.database_admin import restore_database
+
+        result = restore_database(root, args.name, source_database=args.source_database)
+    else:
+        store = store_for(root, initialize=True)
+        result = {"backend": "clickhouse", "database": store.config.database,
+                  "workspace": store.config.workspace, "ready": store.available()}
+    _emit(args, result)
     return 0
 
 
 def _cmd_factor_list(args: argparse.Namespace) -> int:
     if getattr(args, "root", None):
-        with FactorStore.from_root(_root(args.root)) as store:
-            factors = store.list_factors(args.family)
-            if args.json:
-                _emit(args, factors)
-                return 0
-            for factor in factors:
-                print(
-                    f"{factor['name']}\t{factor['family']}\t"
-                    f"{factor['hypothesis_id']}\t{factor['expected_direction']}"
-                )
+        factors = Workspace(_root(args.root)).list_factors(args.family)
+        if args.json:
+            _emit(args, factors)
+            return 0
+        for factor in factors:
+            print(f"{factor['name']}\t{factor['family']}\t"
+                  f"{factor['hypothesis_id']}\t{factor['expected_direction']}")
         return 0
     specs = REGISTRY.list(args.family)
     if args.json:
@@ -133,7 +158,7 @@ def _cmd_factor_list(args: argparse.Namespace) -> int:
 def _cmd_factor_sync(args: argparse.Namespace) -> int:
     with FactorStore.from_root(_root(args.root)) as store:
         store.bootstrap(seed_definitions())
-        print(store.path)
+        _emit(args, {"path": str(store.path)})
     return 0
 
 
@@ -230,56 +255,44 @@ def _cmd_factor_cache_build(args: argparse.Namespace) -> int:
 
 def _cmd_factor_validate(args: argparse.Namespace) -> int:
     with FactorStore.from_root(_root(args.root)) as store:
-        print(json.dumps(store.validate_formula(args.formula), ensure_ascii=False, indent=2))
+        _emit(args, store.validate_formula(args.formula))
     return 0
 
 
 def _cmd_factor_show(args: argparse.Namespace) -> int:
-    with FactorStore.from_root(_root(args.root)) as store:
-        print(json.dumps(store.factor_detail(args.factor_id), ensure_ascii=False, indent=2))
+    _emit(args, Workspace(_root(args.root)).factor(args.factor_id))
     return 0
 
 
 def _cmd_factor_export(args: argparse.Namespace) -> int:
     with FactorStore.from_root(_root(args.root)) as store:
-        print(store.export_catalog(args.output))
+        _emit(args, {"path": str(store.export_catalog(args.output))})
     return 0
 
 
 def _cmd_factor_import(args: argparse.Namespace) -> int:
     with FactorStore.from_root(_root(args.root)) as store:
-        print(store.import_catalog(args.input))
+        _emit(args, {"imported": store.import_catalog(args.input)})
     return 0
 
 
 def _cmd_factor_run(args: argparse.Namespace) -> int:
-    root = _root(args.root)
-    with FactorStore.from_root(root) as store:
-        store.bootstrap(seed_definitions())
-        factors = args.factor or [row["factor_id"] for row in store.list_factors()]
-        if args.panel:
-            config = {
-                "panel": str(Path(args.panel).expanduser().resolve()),
-                "point_in_time_audit_passed": bool(args.point_in_time_audit_passed),
-            }
-        else:
-            if not args.start_date or not args.end_date:
-                raise ValueError("automatic run requires --start-date and --end-date")
-            config = {
-                "source": "automatic",
-                "index_code": args.index,
-                "start_date": args.start_date,
-                "end_date": args.end_date,
-                "point_in_time_audit_passed": args.mode == "formal",
-            }
-        run_id = store.create_run(factors, mode=args.mode, config=config)
-        service = FactorResearchService(store)
-        output = (
-            service.execute_panel_run(run_id, args.panel)
-            if args.panel
-            else service.execute_auto_run(run_id)
+    workspace = Workspace(_root(args.root))
+    workspace.initialize()
+    factors = args.factor or [row["factor_id"] for row in workspace.list_factors()]
+    if args.panel:
+        result = workspace.run_panel(
+            factors, args.panel, mode=args.mode,
+            point_in_time_audit_passed=args.point_in_time_audit_passed,
         )
-        print(output)
+    else:
+        if not args.start_date or not args.end_date:
+            raise ValueError("automatic run requires --start-date and --end-date")
+        result = workspace.run_factors(
+            factors, start_date=args.start_date, end_date=args.end_date,
+            index_code=args.index, mode=args.mode,
+        )
+    _emit(args, result)
     return 0
 
 
@@ -291,13 +304,12 @@ def _cmd_factor_execute_run(args: argparse.Namespace) -> int:
             if args.panel
             else service.execute_auto_run(args.run_id)
         )
-        print(output)
+        _emit(args, {"path": str(output)})
     return 0
 
 
 def _cmd_factor_runs(args: argparse.Namespace) -> int:
-    with FactorStore.from_root(_root(args.root)) as store:
-        print(json.dumps(store.list_runs(), ensure_ascii=False, indent=2))
+    _emit(args, Workspace(_root(args.root)).list_runs())
     return 0
 
 
@@ -309,7 +321,8 @@ def _cmd_factor_promote(args: argparse.Namespace) -> int:
 
 
 def _cmd_factor_serve(args: argparse.Namespace) -> int:
-    import uvicorn
+    uvicorn = require("uvicorn", "web")
+    require("fastapi", "web")
 
     from mlquant.factor_web import create_app
 
@@ -358,41 +371,43 @@ def _cmd_factor_compute(args: argparse.Namespace) -> int:
     result = compute_factors(bundle.daily, bundle.fundamentals, dates, args.factor)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    result.to_parquet(output, index=False)
-    print(output)
+    storage_io.write_frame(result, output, index=False)
+    _emit(args, {"path": str(output)})
     return 0
 
 
 def _cmd_single_factor(args: argparse.Namespace) -> int:
-    panel = pd.read_parquet(args.panel)
+    panel = storage_io.read_frame(args.panel)
     monthly, summary = evaluate_factor_batch(panel)
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    monthly.to_csv(output / "monthly.csv", index=False)
-    summary.to_csv(output / "summary.csv", index=False)
-    print(output)
+    storage_io.write_csv(monthly, output / "monthly.csv", index=False)
+    storage_io.write_csv(summary, output / "summary.csv", index=False)
+    _emit(args, {"path": str(output)})
     return 0
 
 
 def _cmd_combine(args: argparse.Namespace) -> int:
-    history = pd.read_parquet(args.history).set_index(args.date_column)
+    history = storage_io.read_frame(args.history).set_index(args.date_column)
     weights = factor_weights(history, args.method)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    weights.rename_axis("factor_name").reset_index().to_csv(output, index=False)
-    print(output)
+    storage_io.write_csv(weights.rename_axis("factor_name").reset_index(), output, index=False)
+    _emit(args, {"path": str(output)})
     return 0
 
 
 def _cmd_report(args: argparse.Namespace) -> int:
-    config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    config = yaml.safe_load(storage_io.read_text(Path(args.config), encoding="utf-8")) if args.config else {}
     if not args.smoke:
         bundle = EquityDataBundle.from_root(_root(args.root or config.get("data_root")))
-        for index in config["indices"]:
+        for index in config.get("indices", ["000300.SH", "000905.SH", "000852.SH"]):
             bundle.audit(formal=True, index_code=index).require_ok()
-    default_base = Path(args.root or os.environ.get("MLQUANT_DATA_ROOT", ".")).expanduser().resolve()
-    output = Path(args.output or (default_base / "artifacts" / "equity_factor_series"))
-    print(build_series(output, smoke=args.smoke, metadata={"config": str(Path(args.config).resolve())}))
+    output = Path(args.output) if args.output else (
+        _root(args.root or config.get("data_root")) / "artifacts" / "equity_factor_series"
+    )
+    metadata = {"config": str(Path(args.config).resolve())} if args.config else {}
+    _emit(args, {"path": str(build_series(output, smoke=args.smoke, metadata=metadata))})
     return 0
 
 
@@ -402,28 +417,10 @@ def _cmd_report(args: argparse.Namespace) -> int:
 def _report_create(args: argparse.Namespace) -> int:
     spec = load_spec(args.spec)
     with FactorStore.from_root(_root(args.root)) as store:
-        resolved = resolve_factors(store, spec.factors, index_code=spec.universe.index_code)
-        minimum = 1 if spec.combine is None else 2
-        if len(resolved) < minimum:
-            if spec.combine is None:
-                raise ValueError("报告至少需要 1 个因子")
-            raise ValueError("报告至少需要 2 个因子（相关矩阵与合成对比依赖截面数据）")
-        if args.ensure_runs:
-            missing = ReportEngine(store).missing_run_factors(spec, resolved)
-            if missing:
-                print(
-                    f"[ensure-runs] 补跑 {len(missing)} 个因子："
-                    + "、".join(item["factor_id"] for item in missing),
-                    file=sys.stderr, flush=True,
-                )
-                ReportEngine(store).backfill_runs(spec, resolved)
-        report_id = store.create_report(spec.name, spec.to_dict())
+        result = create_report(store, spec, ensure_runs=args.ensure_runs)
     if args.run:
-        return _report_execute(args, report_id)
-    _emit(args, {
-        "report_id": report_id, "status": "queued",
-        "name": spec.name, "factors": len(resolved),
-    })
+        result.update(Workspace(_root(args.root)).start_report(result["report_id"]))
+    _emit(args, result)
     return 0
 
 
@@ -438,8 +435,7 @@ def _report_execute(args: argparse.Namespace, report_id: str | None = None) -> i
 
 
 def _report_status(args: argparse.Namespace) -> int:
-    with FactorStore.from_root(_root(args.root)) as store:
-        row = store.report_detail(args.report_id)
+    row = Workspace(_root(args.root)).report(args.report_id)
     _emit(args, {
         "report_id": row["report_id"], "name": row["name"],
         "status": row["status"], "progress": row["progress"],
@@ -450,27 +446,14 @@ def _report_status(args: argparse.Namespace) -> int:
 
 
 def _report_wait(args: argparse.Namespace) -> int:
-    deadline = time.time() + float(args.timeout or 3600)
-    with FactorStore.from_root(_root(args.root)) as store:
-        while True:
-            row = store.report_detail(args.report_id)
-            if row["status"] in {"succeeded", "failed", "cancelled"}:
-                break
-            if time.time() > deadline:
-                raise TimeoutError(
-                    f"报告 {args.report_id} 在 {args.timeout or 3600}s 内未完成（当前 {row['status']}）"
-                )
-            time.sleep(2)
-    _emit(args, {
-        "report_id": row["report_id"], "status": row["status"],
-        "progress": row["progress"], "error": row["error"], "path": row["path"],
-    })
-    return 0 if row["status"] == "succeeded" else 1
+    row = Workspace(_root(args.root)).wait_report(
+        args.report_id, timeout=args.timeout if args.timeout is not None else 3600,
+    )
+    return _emit_task_result(args, row, ("report_id", "status", "progress", "path"))
 
 
 def _report_list(args: argparse.Namespace) -> int:
-    with FactorStore.from_root(_root(args.root)) as store:
-        rows = store.list_reports()
+    rows = Workspace(_root(args.root)).list_reports()
     if args.status:
         rows = [row for row in rows if row["status"] in args.status.split(",")]
     if args.json:
@@ -485,17 +468,7 @@ def _report_list(args: argparse.Namespace) -> int:
 
 
 def _report_show(args: argparse.Namespace) -> int:
-    root = _root(args.root)
-    with FactorStore.from_root(root) as store:
-        row = store.report_detail(args.report_id)
-    report_dir = Path(row["path"]) if row.get("path") else (
-        root / "factor_library" / "reports" / args.report_id
-    )
-    manifest_path = report_dir / "manifest.json"
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f"报告产物尚未生成：{report_dir}")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    _emit(args, manifest)
+    _emit(args, Workspace(_root(args.root)).report_manifest(args.report_id))
     return 0
 
 
@@ -506,10 +479,12 @@ def _report_export(args: argparse.Namespace) -> int:
     report_dir = Path(row["path"]) if row.get("path") else (
         root / "factor_library" / "reports" / args.report_id
     )
-    if not report_dir.is_dir():
+    if not storage_io.exists(report_dir / "manifest.json"):
         raise FileNotFoundError(f"报告产物尚未生成：{report_dir}")
     output = Path(args.output).expanduser().resolve()
-    shutil.copytree(report_dir, output, dirs_exist_ok=True)
+    for item in storage_io.iterdir(report_dir):
+        if storage_io.exists(item) and not item.is_dir():
+            storage_io.export_resource(item, output / item.name)
     _emit(args, {"report_id": args.report_id, "path": str(output)})
     return 0
 
@@ -562,81 +537,38 @@ def _cmd_signal_export(args: argparse.Namespace) -> int:
 
 
 def _cmd_run_show(args: argparse.Namespace) -> int:
-    with FactorStore.from_root(_root(args.root)) as store:
-        row = store.run_detail(args.run_id)
-    _emit(args, row)
+    _emit(args, Workspace(_root(args.root)).run(args.run_id))
     return 0
 
 
 def _cmd_run_wait(args: argparse.Namespace) -> int:
-    deadline = time.time() + float(args.timeout or 3600)
-    with FactorStore.from_root(_root(args.root)) as store:
-        while True:
-            row = store.connection.execute(
-                "SELECT status, progress, error, completed_at FROM research_run WHERE run_id=?",
-                (args.run_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(args.run_id)
-            if row["status"] in {"succeeded", "failed", "cancelled"}:
-                break
-            if time.time() > deadline:
-                raise TimeoutError(
-                    f"run {args.run_id} 在 {args.timeout or 3600}s 内未完成（当前 {row['status']}）"
-                )
-            time.sleep(2)
-    _emit(args, {
-        "run_id": args.run_id, "status": row["status"],
-        "progress": row["progress"], "error": row["error"],
-        "completed_at": row["completed_at"],
-    })
-    return 0 if row["status"] == "succeeded" else 1
+    row = Workspace(_root(args.root)).wait_run(
+        args.run_id, timeout=args.timeout if args.timeout is not None else 3600,
+    )
+    return _emit_task_result(args, row, ("run_id", "status", "progress", "completed_at"))
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    import pyarrow.parquet as pq
+    _emit(args, Workspace(_root(args.root)).status())
+    return 0
 
-    root = _root(args.root)
-    payload: dict[str, object] = {"root": str(root), "equity": {}, "factor_library": {}}
-    for name in ("daily", "adjustments", "fundamentals", "index_members",
-                 "industries", "calendar", "securities", "status"):
-        path = root / "equity" / f"{name}.parquet"
-        if not path.is_file():
-            continue
-        payload["equity"][name] = {"size": path.stat().st_size}
-        try:
-            schema = pq.ParquetFile(path).schema_arrow
-            payload["equity"][name]["columns"] = sorted(schema.names)
-            payload["equity"][name]["rows"] = pq.ParquetFile(path).metadata.num_rows
-        except Exception as error:  # noqa: BLE001 - best-effort schema reporting
-            payload["equity"][name]["schema_error"] = str(error)
-    with FactorStore.from_root(root) as store:
-        payload["factor_library"] = {
-            "factors": store.connection.execute("SELECT COUNT(*) FROM factor").fetchone()[0],
-            "runs_succeeded": store.connection.execute(
-                "SELECT COUNT(*) FROM research_run WHERE status='succeeded'"
-            ).fetchone()[0],
-            "runs_active": [
-                dict(row) for row in store.connection.execute(
-                    "SELECT run_id, status, progress FROM research_run "
-                    "WHERE status IN ('queued','running') ORDER BY created_at"
-                ).fetchall()
-            ],
-            "reports": store.connection.execute("SELECT COUNT(*) FROM report").fetchone()[0],
-            "reports_active": [
-                dict(row) for row in store.connection.execute(
-                    "SELECT report_id, status, progress FROM report "
-                    "WHERE status IN ('queued','running') ORDER BY created_at"
-                ).fetchall()
-            ],
-            "latest_run": dict(row) if (
-                row := store.connection.execute(
-                    "SELECT run_id, status, completed_at FROM research_run "
-                    "WHERE status='succeeded' ORDER BY completed_at DESC LIMIT 1"
-                ).fetchone()
-            ) else None,
-        }
-    _emit(args, payload)
+
+def _cmd_workflow(args: argparse.Namespace) -> int:
+    from mlquant.workflows.catalog import describe_workflow, list_workflows, run_workflow
+
+    if args.workflow_command == "list":
+        _emit(args, list_workflows())
+    elif args.workflow_command == "describe":
+        _emit(args, describe_workflow(args.name))
+    else:
+        config = yaml.safe_load(storage_io.read_text(Path(args.config), encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("Workflow config must be a mapping")
+        if args.root:
+            config["root"] = _root(args.root)
+        result = run_workflow(args.name, config)
+        _emit(args, result)
+        return 0 if result["ok"] else 1
     return 0
 
 
@@ -644,8 +576,51 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mlquant", description="Point-in-time A-share factor research")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    workflow = commands.add_parser("workflow", help="Discover and run installed research workflows")
+    workflow_commands = workflow.add_subparsers(dest="workflow_command", required=True)
+    workflow_commands.add_parser("list").set_defaults(func=_cmd_workflow)
+    describe = workflow_commands.add_parser("describe")
+    describe.add_argument("name")
+    describe.set_defaults(func=_cmd_workflow)
+    execute = workflow_commands.add_parser("run")
+    execute.add_argument("name")
+    execute.add_argument("--config", required=True)
+    execute.add_argument("--root")
+    execute.set_defaults(func=_cmd_workflow)
+
     data = commands.add_parser("equity-data")
     data_commands = data.add_subparsers(dest="data_command", required=True)
+    parquet = data_commands.add_parser("import-parquet")
+    parquet.add_argument("--root")
+    parquet.add_argument("--input", required=True)
+    parquet.add_argument("--table", required=True, choices=list(EquityDataBundle.TABLES))
+    parquet.add_argument("--mode", choices=("upsert", "replace"), default="upsert")
+    parquet.set_defaults(func=_cmd_import_parquet)
+    tushare = data_commands.add_parser("sync-tushare")
+    tushare.add_argument("--root")
+    tushare.add_argument("--token", help="Prefer TUSHARE_TOKEN environment variable")
+    tushare.add_argument("--start")
+    tushare.add_argument("--end")
+    tushare.add_argument("--dataset", choices=("market", "securities", "fundamentals", "all"), default="market")
+    tushare.add_argument("--symbol", action="append")
+    tushare.add_argument("--rate-limit", type=float, default=.3)
+    tushare.add_argument("--overlap-days", type=int, default=7)
+    tushare.add_argument("--no-daily-basic", action="store_true")
+    tushare.set_defaults(func=_cmd_sync_tushare)
+    storage = commands.add_parser("storage")
+    storage_commands = storage.add_subparsers(dest="storage_command", required=True)
+    for operation in ("init", "migrate", "backup", "restore"):
+        command = storage_commands.add_parser(operation)
+        command.add_argument("--root")
+        if operation == "migrate":
+            command.add_argument("--source", required=True)
+        if operation in {"backup", "restore"}:
+            command.add_argument("--name", required=True)
+        if operation == "backup":
+            command.add_argument("--base")
+        if operation == "restore":
+            command.add_argument("--source-database", required=True)
+        command.set_defaults(func=_cmd_storage)
     audit = data_commands.add_parser("audit")
     audit.add_argument("--root")
     audit.add_argument("--index")
@@ -784,7 +759,7 @@ def build_parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report")
     report_commands = report.add_subparsers(dest="report_command", required=True)
     series = report_commands.add_parser("build-series")
-    series.add_argument("--config", default="config/equity_research.yaml")
+    series.add_argument("--config")
     series.add_argument("--root")
     series.add_argument("--output")
     series.add_argument("--smoke", action="store_true")
@@ -792,7 +767,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_create = report_commands.add_parser("create")
     report_create.add_argument("--root")
     report_create.add_argument("--spec", required=True, help="报告 spec 的 YAML/JSON 文件路径")
-    report_create.add_argument("--run", action="store_true", help="创建后立即同步执行")
+    report_create.add_argument("--run", action="store_true", help="创建后启动后台任务，用 report wait 等待")
     report_create.add_argument("--ensure-runs", action="store_true",
                                help="先为缺少覆盖回测的因子补跑自动回测")
     report_create.add_argument("--json", action="store_true")
@@ -869,17 +844,34 @@ def build_parser() -> argparse.ArgumentParser:
     field_list.add_argument("--root")
     field_list.add_argument("--json", action="store_true")
     field_list.set_defaults(func=_cmd_field_list)
+    def add_json_flags(command_parser):
+        if not any(action.dest == "json" for action in command_parser._actions):
+            command_parser.add_argument("--json", action="store_true")
+        for action in command_parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for child in action.choices.values():
+                    add_json_flags(child)
+    add_json_flags(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    as_json = "--json" in arguments
+    args = parser.parse_args([item for item in arguments if item != "--json"])
+    args.json = as_json
+    driver_logger = logging.getLogger("clickhouse_connect.driver.httpclient")
+    prior_disabled = driver_logger.disabled
+    if as_json:
+        driver_logger.disabled = True
     try:
         return int(args.func(args))
-    except DataContractError as error:
-        parser.error(str(error))
-    except (ValueError, KeyError, FileNotFoundError, TimeoutError) as error:
+    except (ValueError, KeyError, OSError, OptionalDependencyError, sqlite3.Error, yaml.YAMLError, ClickHouseError) as error:
+        if isinstance(error, ClickHouseError):
+            from mlquant.storage import StorageError
+
+            error = StorageError("ClickHouse operation failed; check service, schema and permissions")
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -892,6 +884,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"错误：{error}", file=sys.stderr)
         return 1
+    finally:
+        driver_logger.disabled = prior_disabled
     return 2
 
 

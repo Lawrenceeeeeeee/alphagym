@@ -1,0 +1,69 @@
+name: library
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8.18.1
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: '1'
+        ports:
+          - 8123:8123
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "wget -q --spider http://localhost:8123/ping"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m ruff check src tests scripts
+      - run: python -m pytest -q
+      - run: python scripts/run_equity_smoke.py
+      - run: python scripts/run_library_smoke.py --background
+      - run: python -m build
+  core-wheel:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8.18.1
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: '1'
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget -q --spider http://localhost:8123/ping"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install build
+      - run: python -m build
+      - run: python -m pip install dist/*.whl
+      - name: Exercise installed package outside source tree
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m mlquant factor list --json
+          python "$GITHUB_WORKSPACE/scripts/run_library_smoke.py" --background
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install build
+      - run: python -m build
+      - shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          python -m pip install $wheel.FullName
+      - working-directory: ${{ runner.temp }}
+        run: python -m mlquant --help

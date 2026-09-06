@@ -11,6 +11,7 @@ from typing import Any, Self
 
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.factor_dsl import FormulaCompiler, FormulaEngine
 from mlquant.factor_operators import build_field_registry, build_operator_registry
 from mlquant.factors.base import FactorContext, FactorDefinition, FactorRegistry, FactorSpec
@@ -21,24 +22,30 @@ def _now() -> str:
 
 
 class FactorStore:
-    """SQLite authority for formula definitions, revisions and research lineage."""
+    """ClickHouse authority for definitions and lineage; memory-only mode for pure tests."""
 
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(self, path: str | Path = ":memory:", *, readonly: bool = False) -> None:
         self.path = Path(path).resolve() if str(path) != ":memory:" else None
-        if self.path is not None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(
-            str(self.path) if self.path is not None else ":memory:",
-            timeout=30,
-        )
+        self.connection = sqlite3.connect(":memory:")
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
-        if self.path is not None:
-            self.connection.execute("PRAGMA journal_mode = WAL")
         self.fields = build_field_registry()
         self.operators = build_operator_registry()
         self._create_schema()
-        self.sync_capabilities()
+        fresh = True
+        if self.path is not None:
+            from mlquant.catalog_connection import CatalogConnection, catalog_exists
+            from mlquant.storage_io import store_for
+
+            root = self.path.parent.parent if self.path.parent.name == "factor_library" else self.path.parent
+            database = store_for(root, initialize=not readonly)
+            fresh = not catalog_exists(database)
+            if readonly and fresh:
+                self.connection.close()
+                raise FileNotFoundError("Catalog missing; run factor sync")
+            self.connection = CatalogConnection(self.connection, database, readonly=readonly)
+        if not readonly and fresh:
+            self.sync_capabilities()
 
     @classmethod
     def from_root(cls, root: str | Path) -> FactorStore:
@@ -56,6 +63,10 @@ class FactorStore:
     def _create_schema(self) -> None:
         self.connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS catalog_migration (
+                source_sha256 TEXT PRIMARY KEY,
+                rows_imported INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS factor (
                 factor_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
@@ -387,10 +398,10 @@ class FactorStore:
         status: str = "active", metadata: dict[str, Any] | None = None,
     ) -> str:
         artifact_path = Path(path).expanduser().resolve()
-        if not artifact_path.is_file():
+        if not storage_io.exists(artifact_path):
             raise FileNotFoundError(artifact_path)
         model_version_id = str(uuid.uuid4())
-        digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256(storage_io.read_bytes(artifact_path)).hexdigest()
         with self.connection:
             self.connection.execute(
                 """INSERT INTO model_artifact
@@ -410,6 +421,10 @@ class FactorStore:
         return model_version_id
 
     def bootstrap(self, definitions: Iterable[FactorDefinition]) -> None:
+        with self.connection:
+            self._bootstrap(definitions)
+
+    def _bootstrap(self, definitions: Iterable[FactorDefinition]) -> None:
         pending = list(definitions)
         while pending:
             deferred: list[FactorDefinition] = []
@@ -554,6 +569,8 @@ class FactorStore:
     ) -> str:
         if mode not in {"smoke", "formal"}:
             raise ValueError("run mode must be smoke or formal")
+        if self.path is not None:
+            config = {**config, "data_version": config.get("data_version", storage_io.current_version(self.path.parent.parent))}
         run_id = str(uuid.uuid4())
         now = _now()
         with self.connection:
@@ -656,6 +673,17 @@ class FactorStore:
                         details={"report_id": report_id, "name": name})
         return report_id
 
+    def claim_report(self, report_id: str) -> None:
+        """Atomically admit one worker; completed reports are immutable."""
+        with self.connection:
+            result = self.connection.execute(
+                "UPDATE report SET status='running', started_at=?, progress=0.01 "
+                "WHERE report_id=? AND status='queued'", (_now(), report_id),
+            )
+            if result.rowcount != 1:
+                row = self.report_detail(report_id)
+                raise ValueError(f"Report is not queued: {report_id} ({row['status']})")
+
     def set_report_status(
         self, report_id: str, status: str, *, progress: float | None = None,
         error: str | None = None, run_id: str | None = None, path: str | Path | None = None,
@@ -726,7 +754,7 @@ class FactorStore:
         factor_id: str | None = None, metadata: dict[str, Any] | None = None,
     ) -> str:
         artifact_path = Path(path).resolve()
-        digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256(storage_io.read_bytes(artifact_path)).hexdigest()
         artifact_id = str(uuid.uuid4())
         with self.connection:
             self.connection.execute(

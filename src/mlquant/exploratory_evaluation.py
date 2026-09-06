@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.account import FeeSchedule
 from mlquant.combine import ML_METHODS, factor_weights
 from mlquant.ml_composite import MODEL_KEYS, model_specs
@@ -124,13 +125,13 @@ def _market(root: Path):
 def _load_horizon(paths: list[Path], signals: pd.DatetimeIndex) -> pd.DataFrame:
     blocks = []
     for path in paths:
-        frame = pd.read_parquet(path)
+        frame = storage_io.read_frame(path)
         blocks.append(frame[frame.signal_date.isin(signals)])
     return pd.concat(blocks, ignore_index=True).set_index(["signal_date", "symbol"]).sort_index()
 
 
 def run_comparison(root: Path, output: Path, *, train_row_cap: int = 200_000) -> None:
-    manifest = json.loads((output / "feature_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(storage_io.read_text(output / "feature_manifest.json", encoding="utf-8"))
     paths, factors = [Path(p) for p in manifest["files"]], manifest["factors"]
     marks, observed, calendar = _market(root)
     opened = marks.index
@@ -150,7 +151,7 @@ def run_comparison(root: Path, output: Path, *, train_row_cap: int = 200_000) ->
         "limitations": ["No historical ST exclusions or opening price-limit rejection", "No round lots, auction/volume capacity or dividend tax", "Financial source vintages need further verification", "Adjustment return exposure is not a raw-share corporate-action ledger", "Open-to-open drawdowns omit intraperiod lows", "Early historical transfer fees approximated at 0.2 bps before 2022-04-29"],
         "splits": SPLITS, "feature_signature": manifest["signature"],
     }
-    (output / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage_io.write_text(output / "metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     summaries = []
     for frequency in ("monthly", "weekly", "daily"):
         signals = frequency_signal_dates(calendar, "2014-01-01", "2026-08-31", frequency)
@@ -202,8 +203,8 @@ def run_comparison(root: Path, output: Path, *, train_row_cap: int = 200_000) ->
             destination = output / frequency / method
             destination.mkdir(parents=True, exist_ok=True)
             summary_path = destination / "summary.json"
-            if summary_path.exists():
-                summaries.extend(json.loads(summary_path.read_text(encoding="utf-8")))
+            if storage_io.exists(summary_path):
+                summaries.extend(json.loads(storage_io.read_text(summary_path, encoding="utf-8")))
                 continue
             if method in weights:
                 weight = weights[method] * signs
@@ -251,11 +252,11 @@ def run_comparison(root: Path, output: Path, *, train_row_cap: int = 200_000) ->
                         "blocked_target_weight": float(part.blocked_target_weight.mean()),
                         "evaluation_years": years, "development_is_in_sample": period == "development",
                     })
-                pd.concat(segment_frames, ignore_index=True).to_parquet(destination / f"{scenario}.parquet", index=False)
-            (destination / "model.json").write_text(json.dumps({"training": training_info, "signs": signs.to_dict(), "weights": weights[method].to_dict() if method in weights else None}, indent=2), encoding="utf-8")
-            summary_path.write_text(json.dumps(method_rows, indent=2), encoding="utf-8")
+                storage_io.write_frame(pd.concat(segment_frames, ignore_index=True), destination / f"{scenario}.parquet", index=False)
+            storage_io.write_text(destination / "model.json", json.dumps({"training": training_info, "signs": signs.to_dict(), "weights": weights[method].to_dict() if method in weights else None}, indent=2), encoding="utf-8")
+            storage_io.write_text(summary_path, json.dumps(method_rows, indent=2), encoding="utf-8")
             summaries.extend(method_rows)
-            pd.DataFrame(summaries).to_csv(output / "summary.csv", index=False, encoding="utf-8-sig")
+            storage_io.write_csv(pd.DataFrame(summaries), output / "summary.csv", index=False, encoding="utf-8-sig")
             print(f"finished {frequency} {method} (all costs)", flush=True)
             del score, matrix
             gc.collect()

@@ -1,0 +1,15 @@
+# Method-only example. Supply real PIT inputs for formal use; smoke is watermarked.
+name: Example monthly factor report
+mode: smoke
+holding_period: 1M
+universe:
+  index_code: ALL_A
+window:
+  start: '2014-01-01'
+  end: '2025-12-31'
+splits:
+  development: ['2014-01-01', '2020-12-31']
+  validation: ['2021-01-01', '2023-12-31']
+  test: ['2024-01-01', '2025-12-31']
+factors:
+  include: [MOMENTUM_60D]

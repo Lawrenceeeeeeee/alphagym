@@ -13,12 +13,15 @@
 - 组合在行业内五层，五组行业权重匹配基准；行业内等权且边界权重可拆分。
 - 2026 数据不参与首期选模。开发/验证/测试必须分栏，测试期不可调方向或参数。
 - 修改后运行 `python -m ruff check src tests scripts`、`python -m pytest -q` 和数据/报告烟雾测试。
+- ClickHouse 是数据、缓存、运行目录和报告的唯一持久化数据库；Parquet/CSV 仅显式导入导出。
+  测试需要独立 ClickHouse 服务。`root/storage.yaml` 保存非敏感连接与稳定 workspace；密码、
+  Tushare Token 从环境读取。使用 `storage_io`/`ClickHouseStore` 访问逻辑资源，不直接读写文件。
 
 ## 报告区（研究报告）
 
-- 研究报告全部离线预计算成静态文件（`{root}/factor_library/reports/{report_id}/`：
+- 研究报告全部离线预计算并保存为 ClickHouse 资源（逻辑位置 `{root}/factor_library/reports/{report_id}/`：
   spec.yaml、manifest.json、monthly.parquet、summary.csv、correlation.parquet、combo.json、
-  report.md、report.html），Web 与 CLI 只读成品，点击不触发计算。
+  report.md、report.html），Web 与 CLI 只读成品，点击不触发计算。`report export` 才输出本地文件。
 - 报告 spec 必须写明：股票池（指数/点位申万行业/代码清单）、研究区间、开发/验证/测试三段
   划分（首尾相接、覆盖区间）、**持有期**（当前仅 1M：月末信号、次日开盘成交、持有至下月信号）
   与**因子回看期**（各因子 `lookback_days` 进单因子表与 manifest）。
@@ -34,11 +37,11 @@
 - 所有命令支持 `--json` 输出稳定 JSON 结构；领域错误输出
   `{"ok": false, "error": {"code", "message"}}` 并退出码 1，用法错误退出码 2。
 - 三条标准工作流：
-  1. 体检：`mlquant status --root <root> --json`（数据文件/目录计数/进行中任务）；
+  1. 体检：`mlquant status --root <root> --json`（数据库表行数/数据版本/进行中任务）；
   2. 发现：`mlquant factor list --json`、`mlquant factor show <id> --json`、
      `mlquant run show --run-id <id> --json`、`mlquant report list --json`；
   3. 研究：写 report spec YAML → `mlquant report create --spec x.yaml --run --json`
-     （或 create + `report wait`）→ 读 `reports/{id}/report.md|report.html|*.parquet|combo.json`。
+     （或 create + `report wait`）→ API 读取报告资源，或 `report export` 后读取本地成品。
 - 因子指标筛选（spec `factors.metrics`）基于各因子最近成功 run 的 `factor_metric` 表
   （ALL_A、raw、base_5bps 口径）；排序默认按 |Rank IC|。
 
@@ -55,9 +58,8 @@
 - `adjust_factor` 是累计后复权因子，仅在除权日有记录（该日及之后生效），除权前为 1.0；使用时
   `ffill().fillna(1.0)`。
 - 入库命令：`python -m mlquant.cli equity-data import-qmt --datadir <QMT datadir> --root <数据根>`，
-  产出 `equity/daily.parquet` 与 `equity/adjustments.parquet`（日线分块流式写，避免一次性 concat
-  全市场爆内存）。
+  写入 ClickHouse 逻辑资源 `equity/daily.parquet` 与 `equity/adjustments.parquet`（日线分块流式写，
+  同批发布，避免一次性 concat 全市场爆内存；不生成 Parquet 文件）。
 - 全量日线在模拟盘客户端（如 `D:\国金QMT交易端模拟\datadir`），实盘客户端通常只下载跟踪标的。
   DividData 混有 `.HK`/基金/债券/BJ，正式研究按 6 位 A 股代码过滤；目录里的 `000001_9000.DAT`
   等非 6 位代码文件及坏记录在导入时跳过。
-

@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+from io import BytesIO
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 
+from mlquant import storage_io
+from mlquant.charts import write_charts
 from mlquant.factors import REGISTRY
+from mlquant.optional import require
 
 FAMILIES = ("value", "growth", "momentum", "liquidity", "risk", "quality")
 
 
 def _write_pdf(path: Path, title: str, lines: list[str]) -> None:
-    pdf = canvas.Canvas(str(path), pagesize=A4)
+    require("reportlab", "pdf")
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
     _, height = A4
     pdf.setTitle(title)
     pdf.setFont("Helvetica-Bold", 16)
@@ -30,14 +36,15 @@ def _write_pdf(path: Path, title: str, lines: list[str]) -> None:
         pdf.drawString(48, y, line[:110])
         y -= 13
     pdf.save()
+    storage_io.write_bytes(path, buffer.getvalue())
 
 
 def _write_markdown(path: Path, title: str, body: str, smoke: bool) -> None:
     watermark = "> **非正式 SMOKE 产物：不得用于选模、业绩展示或投资结论。**\n\n" if smoke else ""
-    path.write_text(f"# {title}\n\n{watermark}{body.rstrip()}\n", encoding="utf-8")
+    storage_io.write_text(path, f"# {title}\n\n{watermark}{body.rstrip()}\n", encoding="utf-8")
 
 
-def build_series(output_dir: str | Path, *, smoke: bool, metadata: dict[str, object] | None = None) -> Path:
+def build_series(output_dir: str | Path, *, smoke: bool, metadata: dict[str, object] | None = None, include_pdf: bool = False) -> Path:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     metadata = metadata or {}
@@ -50,8 +57,8 @@ def build_series(output_dir: str | Path, *, smoke: bool, metadata: dict[str, obj
         for spec in REGISTRY.list()
     ]
     catalog = pd.DataFrame(factor_rows)
-    catalog.to_csv(output / "factor_catalog.csv", index=False, encoding="utf-8-sig")
-    catalog.to_parquet(output / "factor_catalog.parquet", index=False)
+    storage_io.write_csv(catalog, output / "factor_catalog.csv", index=False, encoding="utf-8-sig")
+    storage_io.write_frame(catalog, output / "factor_catalog.parquet", index=False)
 
     framework = (
         "样本分为2014–2020开发、2021–2023验证、2024–2025测试；2026不参与首期选模。\n\n"
@@ -73,28 +80,29 @@ def build_series(output_dir: str | Path, *, smoke: bool, metadata: dict[str, obj
     for slug, title, body in reports:
         md_path = output / f"{slug}.md"
         _write_markdown(md_path, title, body, smoke)
-        _write_pdf(output / f"{slug}.pdf", title, ["MLQuant A-share factor series", f"Report: {slug}", f"Smoke: {smoke}"])
+        if include_pdf:
+            _write_pdf(output / f"{slug}.pdf", title, ["MLQuant A-share factor series", f"Report: {slug}", f"Smoke: {smoke}"])
         links.append(f"- [{title}]({slug}.md)")
     _write_markdown(output / "index.md", "MLQuant 因子系列索引", "\n".join(links), smoke)
-    _write_pdf(output / "index.pdf", "MLQuant Factor Series Index", [slug for slug, _, _ in reports])
+    if include_pdf:
+        _write_pdf(output / "index.pdf", "MLQuant Factor Series Index", [slug for slug, _, _ in reports])
 
     counts = catalog.groupby("family", observed=True).size().reindex(FAMILIES)
-    figure, axis = plt.subplots(figsize=(8, 4.5))
-    counts.plot.bar(ax=axis, color="#b21f2d")
-    axis.set_title("Registered factors by family")
-    axis.set_ylabel("count")
-    figure.tight_layout()
-    figure.savefig(output / "factor_catalog.png", dpi=160)
-    plt.close(figure)
+    write_charts(output / "factor_catalog.html", "Registered factors by family", [{
+        "xAxis": {"type": "category", "data": list(FAMILIES)},
+        "yAxis": {"type": "value", "name": "count"},
+        "tooltip": {"trigger": "axis"},
+        "series": [{"type": "bar", "data": counts.fillna(0).tolist()}],
+    }], smoke=smoke)
 
     manifest: dict[str, object] = {
         "formal": not smoke, "watermark": "NON-FORMAL SMOKE" if smoke else None,
         "factor_count": len(catalog), "metadata": metadata, "files": {},
     }
-    for path in sorted(output.iterdir()):
-        if path.name == "manifest.json" or not path.is_file():
+    for path in sorted(storage_io.iterdir(output)):
+        if path.name == "manifest.json" or not storage_io.exists(path):
             continue
-        manifest["files"][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest["files"][path.name] = hashlib.sha256(storage_io.read_bytes(path)).hexdigest()
     manifest_path = output / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage_io.write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest_path

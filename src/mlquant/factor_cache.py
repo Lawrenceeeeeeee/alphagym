@@ -6,7 +6,7 @@ values again and again. This module persists precomputed factor values so
 a backtest only computes factors it has never seen for the current
 (data version, universe, factor revision) combination.
 
-The on-disk layout mirrors tushare's ``factor_value`` long table — one row
+The logical database layout mirrors tushare's ``factor_value`` long table — one row
 per (factor, signal_date, symbol) with a single value column — partitioned
 per factor inside per-universe directories:
 
@@ -17,8 +17,7 @@ per factor inside per-universe directories:
             forward_return.parquet                 # signal_date, symbol, forward_return
 
 Invalidation rules:
-  * market data files change        -> the whole cache is stale (the full
-                                       history is recomputed from the new files);
+  * market resource versions change -> the whole cache is stale;
   * a factor gets a new revision    -> only that factor is recomputed;
   * coverage is tracked as signal-date intervals; a factor is reused only when
     its stored intervals fully cover the requested window.
@@ -29,8 +28,6 @@ import hashlib
 import json
 import math
 import multiprocessing
-import os
-import shutil
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -39,19 +36,21 @@ from typing import Any
 
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.factor_store import FactorStore
 
-DATA_FILES = ("daily", "adjustments", "fundamentals", "index_members", "industries")
+DATA_FILES = ("daily", "adjustments", "fundamentals", "index_members", "industries",
+              "calendar", "securities", "status", "metadata")
 
 
 def data_signature(root: Path) -> dict[str, Any]:
-    """Version fingerprint of the market data files the cache depends on."""
+    """Version fingerprint of the market resources the cache depends on."""
     signature: dict[str, Any] = {}
     for name in DATA_FILES:
-        path = root / "equity" / f"{name}.parquet"
-        if not path.is_file():
+        path = root / "equity" / ("metadata.json" if name == "metadata" else f"{name}.parquet")
+        if not storage_io.exists(path):
             continue
-        stat = path.stat()
+        stat = storage_io.stat(path)
         signature[name] = {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
     return signature
 
@@ -135,10 +134,10 @@ class FactorValueCache:
     # ------------------------------------------------------------ manifest
 
     def load_manifest(self) -> dict[str, Any]:
-        if not self.manifest_path.is_file():
+        if not storage_io.exists(self.manifest_path):
             return {"version": 1, "data_signature": {}, "universes": {}}
         try:
-            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            manifest = json.loads(storage_io.read_text(self.manifest_path, encoding="utf-8"))
         except (OSError, ValueError):
             return {"version": 1, "data_signature": {}, "universes": {}}
         if not isinstance(manifest, dict):
@@ -147,12 +146,10 @@ class FactorValueCache:
 
     def _write_manifest(self, manifest: dict[str, Any]) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        temp = self.manifest_path.with_suffix(".json.tmp")
-        temp.write_text(
+        storage_io.write_text(self.manifest_path,
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        os.replace(temp, self.manifest_path)
 
     def signature_matches(self) -> bool:
         return self.load_manifest().get("data_signature") == data_signature(self.root)
@@ -167,14 +164,8 @@ class FactorValueCache:
         current = data_signature(self.root)
         if self.load_manifest().get("data_signature") == current:
             return False
-        if self.cache_dir.is_dir():
-            for path in self.cache_dir.iterdir():
-                if path.name == "manifest.json":
-                    continue
-                if path.is_dir():
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    path.unlink(missing_ok=True)
+        # Publish a new cache directory manifest. Historical database versions
+        # and legacy source files remain untouched for audit and migration.
         self._write_manifest(
             {"version": 1, "data_signature": current, "universes": {}}
         )
@@ -209,9 +200,9 @@ class FactorValueCache:
             if not _covers(entry.get("intervals"), start, end):
                 continue
             path = self._factor_path(key, factor_id, revision_id)
-            if not path.is_file():
+            if not storage_io.exists(path):
                 continue
-            frame = pd.read_parquet(path)
+            frame = storage_io.read_frame(path)
             frame = frame[
                 (frame["signal_date"] >= start) & (frame["signal_date"] <= end)
             ]
@@ -231,10 +222,10 @@ class FactorValueCache:
         if not _covers(entry.get("intervals"), start, end):
             return None
         path = self._universe_dir(key) / "forward_return.parquet"
-        if not path.is_file():
+        if not storage_io.exists(path):
             return None
         start, end = pd.Timestamp(start), pd.Timestamp(end)
-        frame = pd.read_parquet(path)
+        frame = storage_io.read_frame(path)
         return frame[
             (frame["signal_date"] >= start) & (frame["signal_date"] <= end)
         ].reset_index(drop=True)
@@ -280,10 +271,10 @@ class FactorValueCache:
             if entry and entry.get("revision_id") != revision_id:
                 entry = None
             path = self._factor_path(key, factor_id, revision_id)
-            if entry is None and path.is_file():
-                path.unlink(missing_ok=True)
-            if path.is_file():
-                previous = pd.read_parquet(path)
+            if entry is None and storage_io.exists(path):
+                storage_io.unlink(path, missing_ok=True)
+            if storage_io.exists(path):
+                previous = storage_io.read_frame(path)
                 merged = pd.concat([previous, block], ignore_index=True)
             else:
                 merged = block
@@ -292,9 +283,7 @@ class FactorValueCache:
                 .sort_values(["signal_date", "symbol"])
                 .reset_index(drop=True)
             )
-            temp = path.with_suffix(".tmp.parquet")
-            merged.to_parquet(temp, index=False)
-            os.replace(temp, path)
+            storage_io.write_frame(merged, path, index=False)
             factors_entry[factor_id] = {
                 "revision_id": revision_id,
                 "intervals": _merge_intervals(
@@ -304,8 +293,8 @@ class FactorValueCache:
             }
         if forward is not None and not forward.empty:
             forward_path = universe_dir / "forward_return.parquet"
-            if forward_path.is_file():
-                previous = pd.read_parquet(forward_path)
+            if storage_io.exists(forward_path):
+                previous = storage_io.read_frame(forward_path)
                 merged = pd.concat([previous, forward], ignore_index=True)
             else:
                 merged = forward
@@ -314,9 +303,7 @@ class FactorValueCache:
                 .sort_values(["signal_date", "symbol"])
                 .reset_index(drop=True)
             )
-            temp = forward_path.with_suffix(".tmp.parquet")
-            merged.to_parquet(temp, index=False)
-            os.replace(temp, forward_path)
+            storage_io.write_frame(merged, forward_path, index=False)
             universe["forward"] = {
                 "intervals": _merge_intervals(
                     (universe.get("forward") or {}).get("intervals"),
@@ -332,22 +319,8 @@ class FactorValueCache:
 
 def _data_bounds(root: Path) -> tuple[pd.Timestamp, pd.Timestamp]:
     """Full trading range of the imported daily table."""
-    import pyarrow.parquet as pq
-
-    path = root / "equity" / "daily.parquet"
-    file = pq.ParquetFile(path)
-    minimum: object = None
-    maximum: object = None
-    for group in range(file.metadata.num_row_groups):
-        statistics = file.metadata.row_group(group).column(0).statistics
-        if statistics is not None and statistics.has_min_max:
-            if minimum is None or statistics.min < minimum:
-                minimum = statistics.min
-            if maximum is None or statistics.max > maximum:
-                maximum = statistics.max
-    if minimum is not None and maximum is not None:
-        return pd.Timestamp(minimum).normalize(), pd.Timestamp(maximum).normalize()
-    column = pd.read_parquet(path, columns=["trade_date"])["trade_date"]
+    path = root / 'equity' / 'daily.parquet'
+    column = storage_io.read_frame(path, columns=["trade_date"])["trade_date"]
     return pd.Timestamp(column.min()).normalize(), pd.Timestamp(column.max()).normalize()
 
 
@@ -356,7 +329,7 @@ def _build_chunk_worker(payload: dict[str, Any]) -> list[dict[str, Any]]:
     from mlquant.factor_research_service import FactorResearchService
 
     root = Path(payload["root"])
-    with FactorStore.from_root(root) as store:
+    with storage_io.snapshot(root, payload.get("data_version")), FactorStore.from_root(root) as store:
         service = FactorResearchService(store)
         daily, fundamentals, month_ends, opened, next_month, open_prices = (
             service.prepare_auto_compute(
@@ -377,12 +350,12 @@ def _build_chunk_worker(payload: dict[str, Any]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for factor_id, block in blocks.items():
         path = out_dir / f"{factor_id}.parquet"
-        block.to_parquet(path, index=False)
+        storage_io.write_frame(block, path, index=False)
         results.append({"factor_id": factor_id, "path": str(path),
                         "rows": len(block)})
     if forward is not None and not forward.empty:
         path = out_dir / "forward_return.parquet"
-        forward.to_parquet(path, index=False)
+        storage_io.write_frame(forward, path, index=False)
         results.append({"factor_id": None, "path": str(path),
                         "rows": len(forward)})
     return results
@@ -395,7 +368,7 @@ def _run_payloads(
     # module crashes every worker and leaves pool.map waiting forever, so
     # fall back to in-process computation when there is no real main file.
     main_file = getattr(__import__("__main__"), "__file__", "") or ""
-    spawn_safe = Path(main_file).is_file()
+    spawn_safe = storage_io.exists(Path(main_file))
     if workers <= 1 or len(payloads) <= 1 or not spawn_safe:
         return [_build_chunk_worker(payload) for payload in payloads]
     context = multiprocessing.get_context("spawn")
@@ -440,6 +413,8 @@ def _seed_from_run_panels(
                 continue
             if created < signature_mtimes:
                 continue
+            if config.get("data_version") != storage_io.current_version(root):
+                continue
             if str(row["mode"]) != mode or str(config.get("index_code")) != index_code:
                 continue
             if universe_key(index_code, config.get("universe") or {}) != key:
@@ -456,9 +431,9 @@ def _seed_from_run_panels(
             if not targets:
                 continue
             path = Path(row["path"])
-            if not path.is_file():
+            if not storage_io.exists(path):
                 continue
-            panel = pd.read_parquet(
+            panel = storage_io.read_frame(
                 path, columns=["signal_date", "symbol", "factor_name", "raw_value"]
             )
             panel = panel[panel["factor_name"].isin(targets)]
@@ -482,6 +457,7 @@ def _seed_from_run_panels(
     return sorted(set(seeded))
 
 
+@storage_io.freeze_root
 def build_factor_cache(
     root: str | Path,
     factor_ids: list[str],
@@ -537,6 +513,7 @@ def build_factor_cache(
             payloads = [
                 {
                     "root": str(root),
+                    "data_version": storage_io.current_version(root),
                     "factor_ids": [],
                     "locked": {},
                     "index_code": index_code,
@@ -553,7 +530,7 @@ def build_factor_cache(
             for chunk_result in results:
                 for item in chunk_result:
                     if item["factor_id"] is None:
-                        forwards.append(pd.read_parquet(item["path"]))
+                        forwards.append(storage_io.read_frame(item["path"]))
             if forwards:
                 cache.store(
                     key, {}, {}, pd.concat(forwards, ignore_index=True),
@@ -571,6 +548,7 @@ def build_factor_cache(
             payloads = [
                 {
                     "root": str(root),
+                    "data_version": storage_io.current_version(root),
                     "factor_ids": batch,
                     "locked": batch_locked,
                     "index_code": index_code,
@@ -588,9 +566,9 @@ def build_factor_cache(
             for chunk_result in results:
                 for item in chunk_result:
                     if item["factor_id"] is None:
-                        forwards.append(pd.read_parquet(item["path"]))
+                        forwards.append(storage_io.read_frame(item["path"]))
                         continue
-                    frame = pd.read_parquet(item["path"])
+                    frame = storage_io.read_frame(item["path"])
                     blocks[item["factor_id"]] = (
                         frame if item["factor_id"] not in blocks
                         else pd.concat([blocks[item["factor_id"]], frame],
@@ -613,7 +591,7 @@ def _month_ends(
     root: Path, start: pd.Timestamp, end: pd.Timestamp,
 ) -> list[pd.Timestamp]:
     """Month-end signal dates over [start, end], from the daily table."""
-    column = pd.read_parquet(
+    column = storage_io.read_frame(
         root / "equity" / "daily.parquet", columns=["trade_date"]
     )["trade_date"]
     opened = pd.Series(pd.to_datetime(column.unique())).sort_values()

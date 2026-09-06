@@ -3,14 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-from sklearn.covariance import LedoitWolf
-from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Lasso, Ridge
-from sklearn.neural_network import MLPRegressor
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBRegressor
+
+from mlquant.optional import require
 
 METHODS = (
     "equal", "factor_return_decay", "ic_decay", "max_icir", "max_ic", "pca",
@@ -70,6 +64,14 @@ def factor_weights(history: pd.DataFrame, method: str, *, half_life: float = 6.0
     columns = sample.columns
     decay = exponential_weights(len(sample), half_life)
     mean = np.average(sample.to_numpy(), axis=0, weights=decay)
+    if method == "equal":
+        return pd.Series(np.full(len(columns), 1 / len(columns)), index=columns, name=method)
+    if method in {"factor_return_decay", "ic_decay"}:
+        return pd.Series(_normalize_nonnegative(mean), index=columns, name=method)
+    require("sklearn", "ml")
+    from sklearn.covariance import LedoitWolf
+    from sklearn.decomposition import PCA
+
     covariance = LedoitWolf().fit(sample.to_numpy()).covariance_ if len(sample) >= 2 else np.eye(len(columns))
     if method == "equal":
         weights = np.ones(len(columns))
@@ -86,6 +88,13 @@ def factor_weights(history: pd.DataFrame, method: str, *, half_life: float = 6.0
 
 
 def _ml_estimator(method: str) -> object:
+    require("sklearn", "ml")
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.linear_model import Lasso, Ridge
+    from sklearn.neural_network import MLPRegressor
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
     if method == "lasso":
         return make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=5000, random_state=42))
     if method == "ridge":
@@ -96,7 +105,7 @@ def _ml_estimator(method: str) -> object:
             random_state=42, n_jobs=1,
         )
     if method == "xgb":
-        return XGBRegressor(
+        return require("xgboost", "boosting").XGBRegressor(
             n_estimators=120, max_depth=2, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, random_state=42, n_jobs=1,
             verbosity=0,

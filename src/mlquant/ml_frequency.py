@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.ml_composite import pit_industry
 
 MARKET_FACTORS = {
@@ -396,7 +397,7 @@ def load_frequency_inputs(
     root = Path(root)
     low = pd.Timestamp(start) - pd.Timedelta(days=600)
     high = pd.Timestamp(end) + pd.Timedelta(days=15)
-    daily = pd.read_parquet(
+    daily = storage_io.read_frame(
         root / "equity" / "daily.parquet",
         columns=[
             "trade_date", "symbol", "open", "high", "low", "close", "volume",
@@ -404,13 +405,13 @@ def load_frequency_inputs(
         ],
         filters=[("trade_date", ">=", low), ("trade_date", "<=", high)],
     )
-    adjustments = pd.read_parquet(
+    adjustments = storage_io.read_frame(
         root / "equity" / "adjustments.parquet",
         columns=["trade_date", "symbol", "adjust_factor"],
     )
     adjustments = adjustments[pd.to_datetime(adjustments["trade_date"]) <= high]
-    calendar = pd.read_parquet(root / "equity" / "calendar.parquet")
-    fundamentals = pd.read_parquet(root / "equity" / "fundamentals.parquet")
+    calendar = storage_io.read_frame(root / "equity" / "calendar.parquet")
+    fundamentals = storage_io.read_frame(root / "equity" / "fundamentals.parquet")
     for frame in (daily, adjustments, calendar):
         frame["trade_date"] = pd.to_datetime(frame["trade_date"]).dt.normalize()
     daily = pd.merge_asof(

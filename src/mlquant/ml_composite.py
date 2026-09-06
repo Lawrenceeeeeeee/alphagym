@@ -21,50 +21,50 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMRegressor
-from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
-from sklearn.linear_model import Lasso, LinearRegression, Ridge
-from sklearn.neural_network import MLPRegressor
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeRegressor
-from xgboost import XGBRegressor
 
+from mlquant import storage_io
 from mlquant.audit import assert_selection_isolation
+from mlquant.model_catalog import FEATURE_MODES, LABEL_MODES, MODEL_KEYS
+from mlquant.optional import require
 from mlquant.research import evaluate_factor_batch, neutralize_cross_section, zscore
 
-MODEL_KEYS = ("ols", "lasso", "ridge", "dtree", "rf", "et", "xgb", "lgbm", "mlp")
-FEATURE_MODES = ("z", "neutral")
-LABEL_MODES = ("return", "rank")
 _REFIT_GRACE = pd.Timedelta(days=400)
 
 
 def model_specs() -> dict[str, dict[str, Any]]:
     """Registry of model keys with their display labels and estimator factories."""
     def factories(seed: int) -> dict[str, Any]:
+        require("sklearn", "ml")
+        from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
+        from sklearn.linear_model import Lasso, LinearRegression, Ridge
+        from sklearn.neural_network import MLPRegressor
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.tree import DecisionTreeRegressor
+
         return {
-            "ols": LinearRegression(),
+            "ols": lambda: LinearRegression(),
             # Fixed research configuration; tune only within the allowed selection split.
-            "lasso": make_pipeline(
+            "lasso": lambda: make_pipeline(
                 StandardScaler(), Lasso(alpha=0.001, max_iter=5000, random_state=seed)
             ),
-            "ridge": make_pipeline(StandardScaler(), Ridge(alpha=1.0, random_state=seed)),
-            "dtree": DecisionTreeRegressor(max_depth=4, min_samples_leaf=50, random_state=seed),
-            "rf": RandomForestRegressor(
+            "ridge": lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0, random_state=seed)),
+            "dtree": lambda: DecisionTreeRegressor(max_depth=4, min_samples_leaf=50, random_state=seed),
+            "rf": lambda: RandomForestRegressor(
                 n_estimators=200, max_depth=6, min_samples_leaf=25, random_state=seed, n_jobs=-1,
             ),
-            "et": ExtraTreesRegressor(
+            "et": lambda: ExtraTreesRegressor(
                 n_estimators=200, max_depth=8, min_samples_leaf=25, random_state=seed, n_jobs=-1,
             ),
-            "xgb": XGBRegressor(
+            "xgb": lambda: require("xgboost", "boosting").XGBRegressor(
                 n_estimators=160, max_depth=3, learning_rate=0.05, subsample=0.8,
                 colsample_bytree=0.8, reg_lambda=1.0, random_state=seed, n_jobs=-1, verbosity=0,
             ),
-            "lgbm": LGBMRegressor(
+            "lgbm": lambda: require("lightgbm", "boosting").LGBMRegressor(
                 n_estimators=160, num_leaves=15, learning_rate=0.05, subsample=0.8,
                 colsample_bytree=0.8, reg_lambda=1.0, random_state=seed, n_jobs=-1, verbosity=-1,
             ),
-            "mlp": make_pipeline(
+            "mlp": lambda: make_pipeline(
                 StandardScaler(),
                 MLPRegressor(hidden_layer_sizes=(32, 16), alpha=0.01, max_iter=800, random_state=seed),
             ),
@@ -76,7 +76,7 @@ def model_specs() -> dict[str, dict[str, Any]]:
         "mlp": "神经网络",
     }
     return {
-        key: {"label": labels[key], "factory": lambda seed, key=key: factories(seed)[key]}
+        key: {"label": labels[key], "factory": lambda seed, key=key: factories(seed)[key]()}
         for key in MODEL_KEYS
     }
 
@@ -115,11 +115,11 @@ def load_panel_wide(
 def load_pit_context(root: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """PIT industries and float market cap aligned to the wide feature index."""
     root = Path(root)
-    daily = pd.read_parquet(root / "equity" / "daily.parquet",
+    daily = storage_io.read_frame(root / "equity" / "daily.parquet",
                             columns=["trade_date", "symbol", "float_market_cap"])
     daily["trade_date"] = pd.to_datetime(daily["trade_date"])
     cap = daily.set_index(["trade_date", "symbol"])["float_market_cap"].rename("float_market_cap")
-    industries = pd.read_parquet(root / "equity" / "industries.parquet")
+    industries = storage_io.read_frame(root / "equity" / "industries.parquet")
     for column in ("valid_from", "valid_to"):
         industries[column] = pd.to_datetime(industries[column])
     return industries, cap
@@ -427,6 +427,6 @@ def load_composite_dataset(
     factor_ids: list[str],
     index_code: str = "ALL_A",
 ) -> CompositeDataset:
-    panel = pd.read_parquet(panel_path)
+    panel = storage_io.read_frame(panel_path)
     panel["signal_date"] = pd.to_datetime(panel["signal_date"])
     return load_panel_wide(panel, factor_ids, index_code)

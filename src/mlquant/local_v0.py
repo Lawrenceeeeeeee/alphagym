@@ -12,14 +12,14 @@ from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
-import pyarrow.parquet as pq
 
+from mlquant import storage_io
 from mlquant.audit import assign_period
+from mlquant.charts import write_charts
 from mlquant.combine import METHODS, combine_scores, factor_weights, select_validation_method
 from mlquant.factors import REGISTRY
 from mlquant.factors.technical import (
@@ -150,7 +150,7 @@ def vendor_symbol(value: str) -> str:
 def _constituent_snapshots(paths: LocalSourcePaths) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for index_code, filename in INDEX_FILES.items():
-        frame = pd.read_parquet(paths.meta_root / filename)
+        frame = storage_io.read_frame(paths.meta_root / filename)
         frame = frame.assign(
             index_code=index_code,
             symbol=frame["code"].map(vendor_symbol),
@@ -177,10 +177,10 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
     equity = paths.equity_root
     equity.mkdir(parents=True, exist_ok=True)
     members = _constituent_snapshots(paths)
-    members.to_parquet(equity / "index_members.parquet", index=False)
+    storage_io.write_frame(members, equity / "index_members.parquet", index=False)
     universe = set(members["symbol"])
 
-    stocks = pd.read_parquet(paths.meta_root / "stocks.parquet")
+    stocks = storage_io.read_frame(paths.meta_root / "stocks.parquet")
     stocks["symbol"] = stocks["code"].map(vendor_symbol)
     stocks = stocks[stocks["symbol"].isin(universe)].copy()
     securities = pd.DataFrame(
@@ -190,15 +190,15 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
             "delist_date": pd.to_datetime(stocks["outDate"], errors="coerce"),
         }
     ).drop_duplicates("symbol", keep="last")
-    securities.to_parquet(equity / "securities.parquet", index=False)
+    storage_io.write_frame(securities, equity / "securities.parquet", index=False)
 
-    index_daily = pd.read_parquet(paths.meta_root / "index_daily.parquet")
+    index_daily = storage_io.read_frame(paths.meta_root / "index_daily.parquet")
     calendar = pd.DataFrame(
         {"trade_date": pd.to_datetime(index_daily["date"]).drop_duplicates().sort_values(), "is_open": True}
     )
-    calendar.to_parquet(equity / "calendar.parquet", index=False)
+    storage_io.write_frame(calendar, equity / "calendar.parquet", index=False)
 
-    aux = pd.read_parquet(paths.source_root / "data" / "hf_ml" / "bs_daily_aux.parquet")
+    aux = storage_io.read_frame(paths.source_root / "data" / "hf_ml" / "bs_daily_aux.parquet")
     aux = aux[aux["code"].isin(universe)].copy()
     status = pd.DataFrame(
         {
@@ -211,9 +211,9 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
             "limit_down": False,
         }
     )
-    status.to_parquet(equity / "status.parquet", index=False)
+    storage_io.write_frame(status, equity / "status.parquet", index=False)
 
-    fundamentals = pd.read_parquet(
+    fundamentals = storage_io.read_frame(
         paths.source_root / "data" / "universe" / "fundamentals_quarterly.parquet"
     )
     fundamentals["symbol"] = fundamentals["code"].map(vendor_symbol)
@@ -221,9 +221,9 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
         columns={"avail_date": "available_date"}
     )
     fundamentals = fundamentals.drop(columns=["code"])
-    fundamentals.to_parquet(equity / "fundamentals.parquet", index=False)
+    storage_io.write_frame(fundamentals, equity / "fundamentals.parquet", index=False)
 
-    current = pd.read_parquet(paths.meta_root / "industry.parquet")
+    current = storage_io.read_frame(paths.meta_root / "industry.parquet")
     current["symbol"] = current["code"].map(vendor_symbol)
     current = current[current["symbol"].isin(universe)]
     industries = pd.DataFrame(
@@ -237,7 +237,7 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
             "version": "2026-snapshot",
         }
     ).drop_duplicates("symbol", keep="last")
-    industries.to_parquet(equity / "industries.parquet", index=False)
+    storage_io.write_frame(industries, equity / "industries.parquet", index=False)
 
     metadata = {
         "formal": False,
@@ -248,7 +248,7 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
         "strict_status_start": "2015-01-01",
         "qmt_adjustment": "backward cumulative; adj_price = raw_price * adjust_factor",
     }
-    (equity / "metadata.json").write_text(
+    storage_io.write_text(equity / "metadata.json",
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return {
@@ -263,10 +263,10 @@ def build_local_contract(paths: LocalSourcePaths) -> dict[str, int]:
 
 def _load_filtered_daily(paths: LocalSourcePaths, symbols: set[str]) -> pd.DataFrame:
     cache = paths.artifact_root / "daily_2013_2026_02_v2.parquet"
-    if cache.exists():
-        return pd.read_parquet(cache)
+    if storage_io.exists(cache):
+        return storage_io.read_frame(cache)
     paths.artifact_root.mkdir(parents=True, exist_ok=True)
-    source = pq.ParquetFile(paths.equity_root / "daily.parquet")
+    source = storage_io.TableReader(paths.equity_root / "daily.parquet")
     wanted = pa.array(sorted(symbols))
     chunks: list[pd.DataFrame] = []
     start = pd.Timestamp("2013-01-01")
@@ -282,7 +282,7 @@ def _load_filtered_daily(paths: LocalSourcePaths, symbols: set[str]) -> pd.DataF
         if selected.num_rows:
             chunks.append(selected.to_pandas())
     daily = pd.concat(chunks, ignore_index=True).sort_values(["symbol", "trade_date"])
-    adjustments = pd.read_parquet(paths.equity_root / "adjustments.parquet")
+    adjustments = storage_io.read_frame(paths.equity_root / "adjustments.parquet")
     adjustments = adjustments[
         adjustments["symbol"].isin(symbols) & (adjustments["trade_date"] <= end)
     ]
@@ -290,7 +290,7 @@ def _load_filtered_daily(paths: LocalSourcePaths, symbols: set[str]) -> pd.DataF
     for column in ("open", "high", "low", "close"):
         daily[f"adj_{column}"] = daily[column] * daily["adjust_factor"]
 
-    aux = pd.read_parquet(
+    aux = storage_io.read_frame(
         paths.source_root / "data" / "hf_ml" / "bs_daily_aux.parquet",
         columns=["code", "date", "turn", "tradestatus", "isST"],
     )
@@ -301,7 +301,7 @@ def _load_filtered_daily(paths: LocalSourcePaths, symbols: set[str]) -> pd.DataF
     for column in ("turnover", "tradestatus", "isST"):
         aux[column] = pd.to_numeric(aux[column], errors="coerce")
     daily = daily.merge(aux, on=["trade_date", "symbol"], how="left")
-    daily.to_parquet(cache, index=False)
+    storage_io.write_frame(daily, cache, index=False)
     return daily
 
 
@@ -333,7 +333,7 @@ def _rolling(series: pd.Series, window: int, minimum: int, operation: str) -> pd
 
 
 def _market_returns(paths: LocalSourcePaths) -> pd.DataFrame:
-    frame = pd.read_parquet(paths.meta_root / "index_daily.parquet")
+    frame = storage_io.read_frame(paths.meta_root / "index_daily.parquet")
     frame = frame[frame["code"].isin(["sh.000300", "sh.000905"])].copy()
     frame["index_code"] = frame["code"].map({"sh.000300": "000300.SH", "sh.000905": "000905.SH"})
     frame["trade_date"] = pd.to_datetime(frame["date"])
@@ -372,10 +372,10 @@ def _idio_at_signals(
 
 
 def _signal_members(paths: LocalSourcePaths, signal_dates: pd.DatetimeIndex) -> pd.DataFrame:
-    members = pd.read_parquet(paths.equity_root / "index_members.parquet")
-    securities = pd.read_parquet(paths.equity_root / "securities.parquet").set_index("symbol")
+    members = storage_io.read_frame(paths.equity_root / "index_members.parquet")
+    securities = storage_io.read_frame(paths.equity_root / "securities.parquet").set_index("symbol")
     open_dates = np.sort(
-        pd.read_parquet(paths.equity_root / "calendar.parquet")["trade_date"].to_numpy(
+        storage_io.read_frame(paths.equity_root / "calendar.parquet")["trade_date"].to_numpy(
             dtype="datetime64[ns]"
         )
     )
@@ -395,7 +395,7 @@ def _signal_members(paths: LocalSourcePaths, signal_dates: pd.DatetimeIndex) -> 
 
 
 def _daily_factor_panel(paths: LocalSourcePaths, daily: pd.DataFrame) -> pd.DataFrame:
-    calendar = pd.read_parquet(paths.equity_root / "calendar.parquet")
+    calendar = storage_io.read_frame(paths.equity_root / "calendar.parquet")
     dates = pd.DatetimeIndex(calendar["trade_date"])
     dates = dates[(dates >= "2014-01-01") & (dates <= "2025-12-31")]
     signal_dates = pd.DatetimeIndex(pd.Series(dates).groupby(dates.to_period("M")).max())
@@ -441,7 +441,7 @@ def _daily_factor_panel(paths: LocalSourcePaths, daily: pd.DataFrame) -> pd.Data
 
 def _short_horizon_wide(paths: LocalSourcePaths, daily: pd.DataFrame) -> pd.DataFrame:
     """Compute registered short-window variants at monthly signal dates."""
-    calendar = pd.read_parquet(paths.equity_root / "calendar.parquet")
+    calendar = storage_io.read_frame(paths.equity_root / "calendar.parquet")
     dates = pd.DatetimeIndex(calendar["trade_date"])
     dates = dates[(dates >= "2014-01-01") & (dates <= "2025-12-31")]
     signal_dates = pd.DatetimeIndex(pd.Series(dates).groupby(dates.to_period("M")).max())
@@ -526,7 +526,7 @@ def _fundamental_features(fundamentals: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_fundamental_factors(paths: LocalSourcePaths, wide: pd.DataFrame) -> pd.DataFrame:
-    fundamentals = _fundamental_features(pd.read_parquet(paths.equity_root / "fundamentals.parquet"))
+    fundamentals = _fundamental_features(storage_io.read_frame(paths.equity_root / "fundamentals.parquet"))
     rows: list[pd.DataFrame] = []
     for date, members in wide.groupby("signal_date", observed=True):
         visible = fundamentals[fundamentals["available_date"] <= date]
@@ -569,7 +569,7 @@ def _attach_labels_and_eligibility(
     signal_key = pd.MultiIndex.from_frame(wide[["symbol", "signal_date"]])
     wide["raw_close"] = daily_keyed["close"].reindex(signal_key).to_numpy()
 
-    calendar = pd.DatetimeIndex(pd.read_parquet(paths.equity_root / "calendar.parquet")["trade_date"])
+    calendar = pd.DatetimeIndex(storage_io.read_frame(paths.equity_root / "calendar.parquet")["trade_date"])
     execution_dates = calendar[calendar <= "2026-01-31"]
     execution_signals = sorted(
         pd.Series(execution_dates).groupby(execution_dates.to_period("M")).max().tolist()
@@ -595,7 +595,7 @@ def _attach_labels_and_eligibility(
     wide["forward_return"] = wide["exit_adj_open"] / wide["entry_adj_open"] - 1
     wide = wide[wide["listed_trading_days"] >= 250].copy()
 
-    status = pd.read_parquet(paths.equity_root / "status.parquet")
+    status = storage_io.read_frame(paths.equity_root / "status.parquet")
     status = status.rename(columns={"trade_date": "signal_date"})
     wide = wide.merge(
         status[["signal_date", "symbol", "is_st", "is_suspended"]],
@@ -633,7 +633,7 @@ def _melt_factor_panel(wide: pd.DataFrame, factor_names: tuple[str, ...]) -> pd.
 
 def build_v0_factor_panel(paths: LocalSourcePaths) -> pd.DataFrame:
     """Build 39-factor monthly panel for HS300/CSI500 with open-to-open labels."""
-    members = pd.read_parquet(paths.equity_root / "index_members.parquet")
+    members = storage_io.read_frame(paths.equity_root / "index_members.parquet")
     symbols = set(members["symbol"])
     daily = _load_filtered_daily(paths, symbols)
     wide = _attach_labels_and_eligibility(paths, daily, _daily_factor_panel(paths, daily))
@@ -641,23 +641,23 @@ def build_v0_factor_panel(paths: LocalSourcePaths) -> pd.DataFrame:
 
     long = _melt_factor_panel(wide, PRICE_VOLUME_FACTORS + FUNDAMENTAL_FACTORS)
     output = paths.artifact_root / "factor_panel_39.parquet"
-    long.to_parquet(output, index=False)
+    storage_io.write_frame(long, output, index=False)
     return long
 
 
 def build_short_horizon_panel(paths: LocalSourcePaths) -> pd.DataFrame:
     """Build the pre-registered 1D--252D parameter-sensitivity panel."""
-    members = pd.read_parquet(paths.equity_root / "index_members.parquet")
+    members = storage_io.read_frame(paths.equity_root / "index_members.parquet")
     symbols = set(members["symbol"])
     daily = _load_filtered_daily(paths, symbols)
     wide = _attach_labels_and_eligibility(paths, daily, _short_horizon_wide(paths, daily))
     long = _melt_factor_panel(wide, SHORT_HORIZON_FACTORS)
-    long.to_parquet(paths.artifact_root / "short_horizon_panel.parquet", index=False)
+    storage_io.write_frame(long, paths.artifact_root / "short_horizon_panel.parquet", index=False)
     return long
 
 
 def _technical_wide(paths: LocalSourcePaths, daily: pd.DataFrame) -> pd.DataFrame:
-    calendar = pd.read_parquet(paths.equity_root / "calendar.parquet")
+    calendar = storage_io.read_frame(paths.equity_root / "calendar.parquet")
     dates = pd.DatetimeIndex(calendar["trade_date"])
     dates = dates[(dates >= "2014-01-01") & (dates <= "2025-12-31")]
     signal_dates = pd.DatetimeIndex(pd.Series(dates).groupby(dates.to_period("M")).max())
@@ -708,17 +708,17 @@ def _write_technical_catalog(paths: LocalSourcePaths) -> None:
                 "note": note,
             }
         )
-    pd.DataFrame(rows).to_csv(paths.artifact_root / "technical_factor_catalog.csv", index=False)
+    storage_io.write_csv(pd.DataFrame(rows), paths.artifact_root / "technical_factor_catalog.csv", index=False)
 
 
 def build_technical_factor_panel(paths: LocalSourcePaths) -> pd.DataFrame:
     """Build all independently calculable price-volume factors from the workbook."""
-    members = pd.read_parquet(paths.equity_root / "index_members.parquet")
+    members = storage_io.read_frame(paths.equity_root / "index_members.parquet")
     symbols = set(members["symbol"])
     daily = _load_filtered_daily(paths, symbols)
     wide = _attach_labels_and_eligibility(paths, daily, _technical_wide(paths, daily))
     long = _melt_factor_panel(wide, TECHNICAL_FACTOR_NAMES)
-    long.to_parquet(paths.artifact_root / "technical_factor_panel.parquet", index=False)
+    storage_io.write_frame(long, paths.artifact_root / "technical_factor_panel.parquet", index=False)
     _write_technical_catalog(paths)
     return long
 
@@ -755,11 +755,11 @@ def evaluate_v0(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Evaluate both indices separately and write BH-adjusted single-factor results."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "factor_panel_39.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "factor_panel_39.parquet")
     monthly, summary = _evaluate_panel(panel)
     paths.artifact_root.mkdir(parents=True, exist_ok=True)
-    monthly.to_parquet(paths.artifact_root / "single_factor_monthly.parquet", index=False)
-    summary.to_csv(paths.artifact_root / "single_factor_summary.csv", index=False)
+    storage_io.write_frame(monthly, paths.artifact_root / "single_factor_monthly.parquet", index=False)
+    storage_io.write_csv(summary, paths.artifact_root / "single_factor_summary.csv", index=False)
     return monthly, summary
 
 
@@ -768,21 +768,21 @@ def evaluate_short_horizon(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Evaluate the short-window batch with a single batch-wide BH correction."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "short_horizon_panel.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "short_horizon_panel.parquet")
     monthly, summary = _evaluate_panel(panel)
-    monthly.to_parquet(paths.artifact_root / "short_horizon_monthly.parquet", index=False)
-    summary.to_csv(paths.artifact_root / "short_horizon_summary.csv", index=False)
+    storage_io.write_frame(monthly, paths.artifact_root / "short_horizon_monthly.parquet", index=False)
+    storage_io.write_csv(summary, paths.artifact_root / "short_horizon_summary.csv", index=False)
     return monthly, summary
 
 
 def build_expanded_factor_panel(paths: LocalSourcePaths) -> pd.DataFrame:
     """Merge the baseline and short-window panels without duplicating shared factors."""
-    baseline = pd.read_parquet(paths.artifact_root / "factor_panel_39.parquet")
-    short = pd.read_parquet(paths.artifact_root / "short_horizon_panel.parquet")
+    baseline = storage_io.read_frame(paths.artifact_root / "factor_panel_39.parquet")
+    short = storage_io.read_frame(paths.artifact_root / "short_horizon_panel.parquet")
     baseline_names = set(baseline["factor_name"].unique())
     short = short[~short["factor_name"].isin(baseline_names)]
     expanded = pd.concat([baseline, short], ignore_index=True)
-    expanded.to_parquet(paths.artifact_root / "expanded_factor_panel.parquet", index=False)
+    storage_io.write_frame(expanded, paths.artifact_root / "expanded_factor_panel.parquet", index=False)
     return expanded
 
 
@@ -791,10 +791,10 @@ def evaluate_expanded_factors(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Re-evaluate all available factors as one multiple-testing family."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "expanded_factor_panel.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "expanded_factor_panel.parquet")
     monthly, summary = _evaluate_panel(panel)
-    monthly.to_parquet(paths.artifact_root / "expanded_factor_monthly.parquet", index=False)
-    summary.to_csv(paths.artifact_root / "expanded_factor_summary.csv", index=False)
+    storage_io.write_frame(monthly, paths.artifact_root / "expanded_factor_monthly.parquet", index=False)
+    storage_io.write_csv(summary, paths.artifact_root / "expanded_factor_summary.csv", index=False)
     return monthly, summary
 
 
@@ -803,21 +803,21 @@ def evaluate_technical_factors(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Evaluate workbook technical factors as one multiple-testing family."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "technical_factor_panel.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "technical_factor_panel.parquet")
     monthly, summary = _evaluate_panel(panel)
-    monthly.to_parquet(paths.artifact_root / "technical_factor_monthly.parquet", index=False)
-    summary.to_csv(paths.artifact_root / "technical_factor_summary.csv", index=False)
+    storage_io.write_frame(monthly, paths.artifact_root / "technical_factor_monthly.parquet", index=False)
+    storage_io.write_csv(summary, paths.artifact_root / "technical_factor_summary.csv", index=False)
     return monthly, summary
 
 
 def build_full_factor_panel(paths: LocalSourcePaths) -> pd.DataFrame:
     """Merge classic, short-window and workbook factors without duplicate names."""
-    expanded = pd.read_parquet(paths.artifact_root / "expanded_factor_panel.parquet")
-    technical = pd.read_parquet(paths.artifact_root / "technical_factor_panel.parquet")
+    expanded = storage_io.read_frame(paths.artifact_root / "expanded_factor_panel.parquet")
+    technical = storage_io.read_frame(paths.artifact_root / "technical_factor_panel.parquet")
     known = set(expanded["factor_name"].unique())
     technical = technical[~technical["factor_name"].isin(known)]
     full = pd.concat([expanded, technical], ignore_index=True)
-    full.to_parquet(paths.artifact_root / "full_factor_panel.parquet", index=False)
+    storage_io.write_frame(full, paths.artifact_root / "full_factor_panel.parquet", index=False)
     return full
 
 
@@ -826,10 +826,10 @@ def evaluate_full_factors(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Evaluate the complete available pool under one batch-wide BH correction."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "full_factor_panel.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "full_factor_panel.parquet")
     monthly, summary = _evaluate_panel(panel)
-    monthly.to_parquet(paths.artifact_root / "full_factor_monthly.parquet", index=False)
-    summary.to_csv(paths.artifact_root / "full_factor_summary.csv", index=False)
+    storage_io.write_frame(monthly, paths.artifact_root / "full_factor_monthly.parquet", index=False)
+    storage_io.write_csv(summary, paths.artifact_root / "full_factor_summary.csv", index=False)
     return monthly, summary
 
 
@@ -875,7 +875,7 @@ def _performance_metrics(returns: pd.Series) -> dict[str, float]:
 
 
 def _benchmark_forward_returns(paths: LocalSourcePaths, panel: pd.DataFrame) -> pd.Series:
-    index_daily = pd.read_parquet(paths.meta_root / "index_daily.parquet")
+    index_daily = storage_io.read_frame(paths.meta_root / "index_daily.parquet")
     index_daily = index_daily[index_daily["code"].isin(["sh.000300", "sh.000905"])].copy()
     index_daily["index_code"] = index_daily["code"].map(
         {"sh.000300": "000300.SH", "sh.000905": "000905.SH"}
@@ -904,7 +904,7 @@ def build_v0_portfolios(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build direction-aligned equal-weight quintiles and costed top-layer diagnostics."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "factor_panel_39.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "factor_panel_39.parquet")
     direction = {spec.name: spec.expected_direction for spec in REGISTRY.list()}
     benchmark = _benchmark_forward_returns(paths, panel)
     detail_rows: list[dict[str, object]] = []
@@ -978,8 +978,8 @@ def build_v0_portfolios(
                 }
             )
     metrics = pd.DataFrame(metric_rows)
-    detail.to_parquet(paths.artifact_root / f"{output_prefix}_portfolios.parquet", index=False)
-    metrics.to_csv(paths.artifact_root / f"{output_prefix}_portfolio_metrics.csv", index=False)
+    storage_io.write_frame(detail, paths.artifact_root / f"{output_prefix}_portfolios.parquet", index=False)
+    storage_io.write_csv(metrics, paths.artifact_root / f"{output_prefix}_portfolio_metrics.csv", index=False)
     return detail, metrics
 
 
@@ -992,7 +992,7 @@ def _selected_development_factors(
     require_bh_significance: bool = True,
 ) -> list[str]:
     if summary is None:
-        summary = pd.read_csv(paths.artifact_root / "single_factor_summary.csv")
+        summary = storage_io.read_csv(paths.artifact_root / "single_factor_summary.csv")
     sample = summary[
         (summary["index_code"] == index_code)
         & (summary["period"] == "development")
@@ -1066,13 +1066,13 @@ def build_v0_combinations(
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str]]:
     """Compare six development-selected combinations; freeze weights before test."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "factor_panel_39.parquet")
+        panel = storage_io.read_frame(paths.artifact_root / "factor_panel_39.parquet")
     if factor_monthly is None:
-        factor_monthly = pd.read_parquet(
+        factor_monthly = storage_io.read_frame(
             paths.artifact_root / "single_factor_monthly.parquet"
         )
     if factor_summary is None:
-        factor_summary = pd.read_csv(paths.artifact_root / "single_factor_summary.csv")
+        factor_summary = storage_io.read_csv(paths.artifact_root / "single_factor_summary.csv")
     factor_monthly = factor_monthly[
         (factor_monthly["value_type"] == "raw")
         & (factor_monthly["orientation"] == "original")
@@ -1214,23 +1214,23 @@ def build_v0_combinations(
                 }
             )
         selection[index_code] = select_validation_method(pd.DataFrame(candidates))
-    portfolios.to_parquet(
+    storage_io.write_frame(portfolios,
         paths.artifact_root / f"{output_prefix}_portfolios.parquet", index=False
     )
-    metrics.to_csv(paths.artifact_root / f"{output_prefix}_metrics.csv", index=False)
-    pd.DataFrame(weight_rows).to_parquet(
+    storage_io.write_csv(metrics, paths.artifact_root / f"{output_prefix}_metrics.csv", index=False)
+    storage_io.write_frame(pd.DataFrame(weight_rows),
         paths.artifact_root / f"{output_prefix}_weights.parquet", index=False
     )
-    (paths.artifact_root / f"{output_prefix}_selection.json").write_text(
+    storage_io.write_text(paths.artifact_root / f"{output_prefix}_selection.json",
         json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    (paths.artifact_root / f"{output_prefix}_selected_factors.json").write_text(
+    storage_io.write_text(paths.artifact_root / f"{output_prefix}_selected_factors.json",
         json.dumps(selected_by_index, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    (paths.artifact_root / f"{output_prefix}_locked_signs.json").write_text(
+    storage_io.write_text(paths.artifact_root / f"{output_prefix}_locked_signs.json",
         json.dumps(locked_signs_by_index, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    (paths.artifact_root / f"{output_prefix}_selection_policy.json").write_text(
+    storage_io.write_text(paths.artifact_root / f"{output_prefix}_selection_policy.json",
         json.dumps(
             {
                 "development_only": True,
@@ -1252,9 +1252,9 @@ def build_expanded_combinations(
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str]]:
     """Combine baseline plus short-window factors, one variant per hypothesis."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "expanded_factor_panel.parquet")
-    monthly = pd.read_parquet(paths.artifact_root / "expanded_factor_monthly.parquet")
-    summary = pd.read_csv(paths.artifact_root / "expanded_factor_summary.csv")
+        panel = storage_io.read_frame(paths.artifact_root / "expanded_factor_panel.parquet")
+    monthly = storage_io.read_frame(paths.artifact_root / "expanded_factor_monthly.parquet")
+    summary = storage_io.read_csv(paths.artifact_root / "expanded_factor_summary.csv")
     return build_v0_combinations(
         paths,
         panel,
@@ -1269,10 +1269,10 @@ def build_expanded_baseline_combinations(
     paths: LocalSourcePaths,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str]]:
     """Build a hypothesis-collapsed 39-factor comparator under the 70-factor q-family."""
-    panel = pd.read_parquet(paths.artifact_root / "factor_panel_39.parquet")
+    panel = storage_io.read_frame(paths.artifact_root / "factor_panel_39.parquet")
     names = set(panel["factor_name"].unique())
-    monthly = pd.read_parquet(paths.artifact_root / "expanded_factor_monthly.parquet")
-    summary = pd.read_csv(paths.artifact_root / "expanded_factor_summary.csv")
+    monthly = storage_io.read_frame(paths.artifact_root / "expanded_factor_monthly.parquet")
+    summary = storage_io.read_csv(paths.artifact_root / "expanded_factor_summary.csv")
     return build_v0_combinations(
         paths,
         panel,
@@ -1288,9 +1288,9 @@ def build_technical_combinations(
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str]]:
     """Combine only the workbook technical factors, one variant per hypothesis."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "technical_factor_panel.parquet")
-    monthly = pd.read_parquet(paths.artifact_root / "technical_factor_monthly.parquet")
-    summary = pd.read_csv(paths.artifact_root / "technical_factor_summary.csv")
+        panel = storage_io.read_frame(paths.artifact_root / "technical_factor_panel.parquet")
+    monthly = storage_io.read_frame(paths.artifact_root / "technical_factor_monthly.parquet")
+    summary = storage_io.read_csv(paths.artifact_root / "technical_factor_summary.csv")
     return build_v0_combinations(
         paths,
         panel,
@@ -1307,9 +1307,9 @@ def build_full_combinations(
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str]]:
     """Combine the complete available pool, one concrete variant per hypothesis."""
     if panel is None:
-        panel = pd.read_parquet(paths.artifact_root / "full_factor_panel.parquet")
-    monthly = pd.read_parquet(paths.artifact_root / "full_factor_monthly.parquet")
-    summary = pd.read_csv(paths.artifact_root / "full_factor_summary.csv")
+        panel = storage_io.read_frame(paths.artifact_root / "full_factor_panel.parquet")
+    monthly = storage_io.read_frame(paths.artifact_root / "full_factor_monthly.parquet")
+    summary = storage_io.read_csv(paths.artifact_root / "full_factor_summary.csv")
     return build_v0_combinations(
         paths,
         panel,
@@ -1323,12 +1323,12 @@ def build_full_combinations(
 
 def build_v0_report(paths: LocalSourcePaths, report_path: Path) -> Path:
     """Render the concise Markdown report, two diagnostic charts and a hash manifest."""
-    summary = pd.read_csv(paths.artifact_root / "single_factor_summary.csv")
-    multi = pd.read_csv(paths.artifact_root / "multi_factor_metrics.csv")
+    summary = storage_io.read_csv(paths.artifact_root / "single_factor_summary.csv")
+    multi = storage_io.read_csv(paths.artifact_root / "multi_factor_metrics.csv")
     selection = json.loads(
-        (paths.artifact_root / "multi_factor_selection.json").read_text(encoding="utf-8")
+        storage_io.read_text(paths.artifact_root / "multi_factor_selection.json", encoding="utf-8")
     )
-    panel = pd.read_parquet(
+    panel = storage_io.read_frame(
         paths.artifact_root / "factor_panel_39.parquet",
         columns=["signal_date", "symbol", "index_code", "factor_name"],
     )
@@ -1345,36 +1345,38 @@ def build_v0_report(paths: LocalSourcePaths, report_path: Path) -> Path:
         axis=1,
     )
 
-    ic_chart = paths.artifact_root / "v0_ic_stability.png"
-    figure, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-    for axis, (index_code, sample) in zip(axes, expected.groupby("index_code", observed=True)):
+    ic_chart = paths.artifact_root / "v0_ic_stability.html"
+    options = []
+    for index_code, sample in expected.groupby("index_code", observed=True):
         pivot = sample.pivot(index="factor_name", columns="period", values="aligned_ic")
         pivot["stable"] = pivot[["development", "validation"]].min(axis=1)
-        pivot.nlargest(10, "stable")[["development", "validation", "test"]].plot.barh(
-            ax=axis
-        )
-        axis.axvline(0, color="black", linewidth=0.7)
-        axis.set_title(index_code)
-        axis.set_xlabel("Direction-aligned Rank IC")
-        axis.set_ylabel("")
-        axis.invert_yaxis()
-    figure.tight_layout()
-    figure.savefig(ic_chart, dpi=160)
-    plt.close(figure)
-
-    multi_chart = paths.artifact_root / "v0_multi_factor_ir.png"
+        pivot = pivot.nlargest(10, "stable")
+        options.append({
+            "title": {"text": str(index_code)}, "tooltip": {"trigger": "axis"},
+            "legend": {"top": 30}, "grid": {"left": 180, "top": 80},
+            "xAxis": {"type": "value", "name": "Direction-aligned Rank IC"},
+            "yAxis": {"type": "category", "data": pivot.index.tolist(), "inverse": True},
+            "series": [{"type": "bar", "name": period, "data": pivot[period].tolist()}
+                       for period in ("development", "validation", "test")],
+        })
+    write_charts(ic_chart, "IC stability", options, smoke=True)
+    multi_chart = paths.artifact_root / "v0_multi_factor_ir.html"
     chart_data = multi[multi["period"].isin(["validation", "test"])].pivot_table(
         index=["index_code", "method"], columns="period", values="net_information_ratio"
     )
-    figure, axes = plt.subplots(1, 2, figsize=(13, 5), sharey=True)
-    for axis, index_code in zip(axes, sorted(chart_data.index.get_level_values(0).unique())):
-        chart_data.loc[index_code].plot.bar(ax=axis)
-        axis.axhline(0, color="black", linewidth=0.7)
-        axis.set_title(index_code)
-        axis.set_ylabel("Net excess information ratio")
-    figure.tight_layout()
-    figure.savefig(multi_chart, dpi=160)
-    plt.close(figure)
+    options = []
+    for index_code in sorted(chart_data.index.get_level_values(0).unique()):
+        sample = chart_data.loc[index_code]
+        options.append({
+            "title": {"text": str(index_code)}, "tooltip": {"trigger": "axis"},
+            "legend": {"top": 30}, "grid": {"top": 80, "bottom": 100},
+            "xAxis": {"type": "category", "data": sample.index.tolist(),
+                      "axisLabel": {"rotate": 45}},
+            "yAxis": {"type": "value", "name": "Net excess information ratio"},
+            "series": [{"type": "bar", "name": period, "data": sample[period].tolist()}
+                       for period in sample.columns],
+        })
+    write_charts(multi_chart, "Multi-factor IR", options, smoke=True)
 
     lines = [
         "# A股华泰式因子研究 v0（非正式）",
@@ -1535,26 +1537,23 @@ def build_v0_report(paths: LocalSourcePaths, report_path: Path) -> Path:
         ]
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text("\n".join(lines), encoding="utf-8")
+    storage_io.write_text(report_path, "\n".join(lines), encoding="utf-8")
 
     import hashlib
 
     manifest: dict[str, dict[str, object]] = {}
-    for artifact in sorted(paths.artifact_root.iterdir()):
+    for artifact in sorted(storage_io.iterdir(paths.artifact_root)):
         if (
-            artifact.is_file()
+            storage_io.exists(artifact)
             and artifact.name != "manifest.json"
             and not artifact.name.startswith("daily_2013_")
         ):
-            digest = hashlib.sha256()
-            with artifact.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
+            digest = hashlib.sha256(storage_io.read_bytes(artifact))
             manifest[artifact.name] = {
-                "bytes": artifact.stat().st_size,
+                "bytes": storage_io.stat(artifact).st_size,
                 "sha256": digest.hexdigest(),
             }
-    (paths.artifact_root / "manifest.json").write_text(
+    storage_io.write_text(paths.artifact_root / "manifest.json",
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return report_path

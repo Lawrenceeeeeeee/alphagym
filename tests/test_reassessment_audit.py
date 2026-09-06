@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import pytest
 
+from mlquant import storage_io
 from mlquant.reassessment_audit import audit_reassessment_data, require_reassessment_data
 
 
@@ -15,13 +16,13 @@ def test_missing_data_fails_closed_and_writes_structured_audit(tmp_path) -> None
     output = tmp_path / "audit"
     with pytest.raises(ValueError, match="Missing"):
         require_reassessment_data(tmp_path, output)
-    assert json.loads((output / "audit_ALL_A.json").read_text())["ok"] is False
+    assert json.loads(storage_io.read_text(output / "audit_ALL_A.json"))["ok"] is False
 
 
 def test_backfilled_industry_and_missing_limits_never_pass_as_formal(tmp_path) -> None:
     equity = tmp_path / "equity"
     equity.mkdir()
-    (equity / "metadata.json").write_text(json.dumps({
+    storage_io.write_text(equity / "metadata.json", json.dumps({
         "formal": True, "sw1_gap_fill": "carry-forward/backfill",
         "limit_status_unavailable": True, "st_status_unavailable": True,
     }))
@@ -40,7 +41,7 @@ def test_index_member_dropped_from_snapshot_cannot_remain_active(tmp_path) -> No
         "valid_to": pd.to_datetime([None, "2023-12-31", None]),
         "benchmark_weight": [50., 50., 100.],
     })
-    members.to_parquet(equity / "index_members.parquet", index=False)
+    storage_io.write_frame(members, equity / "index_members.parquet", index=False)
     result = audit_reassessment_data(tmp_path, index_code="000300.SH")
     issue = next(item for item in result["issues"] if item["code"] == "STALE_INDEX_INTERVAL")
     assert issue["severity"] == "error"

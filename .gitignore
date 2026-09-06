@@ -53,3 +53,5 @@ dividend_dump.txt
 *.dat
 *.db
 *.csv
+/clickhouse-data/
+/clickhouse-backups/

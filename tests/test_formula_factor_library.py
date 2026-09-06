@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from mlquant import storage_io
 from mlquant.factor_dsl import FormulaCompiler, FormulaError
 from mlquant.factor_operators import build_field_registry, build_operator_registry
 from mlquant.factor_research_service import FactorResearchService
@@ -115,13 +116,13 @@ def test_catalog_export_is_deterministic(tmp_path) -> None:
         store.bootstrap(seed_definitions())
         first = store.export_catalog(tmp_path / "first.json")
         second = store.export_catalog(tmp_path / "second.json")
-    assert first.read_bytes() == second.read_bytes()
-    assert len(json.loads(first.read_text(encoding="utf-8"))["factors"]) == 169
+    assert storage_io.read_bytes(first) == storage_io.read_bytes(second)
+    assert len(json.loads(storage_io.read_text(first, encoding="utf-8"))["factors"]) == 169
 
 
 def test_model_formula_pins_artifact_and_blocks_future_training(tmp_path) -> None:
     artifact = tmp_path / "model.bin"
-    artifact.write_bytes(b"model")
+    storage_io.write_bytes(artifact, b"model")
     daily = pd.DataFrame({
         "trade_date": pd.to_datetime(["2025-01-02"]),
         "symbol": ["A"], "close": [10.0], "adj_close": [10.0],
@@ -164,7 +165,7 @@ def test_panel_research_run_writes_metrics_and_artifacts(tmp_path) -> None:
         for date in dates for symbol in range(1, 11)
     ])
     panel_path = tmp_path / "panel.parquet"
-    panel.to_parquet(panel_path, index=False)
+    storage_io.write_frame(panel, panel_path, index=False)
     with FactorStore.from_root(tmp_path) as store:
         store.save_definition(_definition("A", "=ASOF(market.close)"))
         run_id = store.create_run(["A"], mode="smoke", config={})
@@ -189,7 +190,7 @@ def test_panel_research_run_writes_metrics_and_artifacts(tmp_path) -> None:
         item["path"] for item in detail["artifacts"]
         if item["kind"] == "layered_performance"
     )
-    performance = pd.read_parquet(performance_path)
+    performance = storage_io.read_frame(performance_path)
     assert set(performance["portfolio"]) == {
         "group_1", "group_2", "group_3", "group_4", "group_5",
         "benchmark", "long_short",
@@ -341,12 +342,12 @@ def _write_auto_run_market_data(root) -> None:
             })
     equity = root / "equity"
     equity.mkdir(parents=True)
-    pd.DataFrame(rows).to_parquet(equity / "daily.parquet", index=False)
-    pd.DataFrame({
+    storage_io.write_frame(pd.DataFrame(rows), equity / "daily.parquet", index=False)
+    storage_io.write_frame(pd.DataFrame({
         "trade_date": [dates[0]] * len(symbols),
         "symbol": symbols,
         "adjust_factor": [1.0] * len(symbols),
-    }).to_parquet(equity / "adjustments.parquet", index=False)
+    }), equity / "adjustments.parquet", index=False)
 
 
 def test_auto_run_builds_factor_panel_from_registered_market_data(tmp_path) -> None:
@@ -442,7 +443,7 @@ def test_report_engine_builds_static_report(tmp_path) -> None:
         row = store.report_detail(report_id)
     assert row["status"] == "succeeded"
     assert output.is_dir()
-    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(storage_io.read_text(output / "manifest.json", encoding="utf-8"))
     assert {item["factor_id"] for item in manifest["factors"]} == {"BOARD_A", "BOARD_B"}
     assert all(item["lookback_days"] in (5, 20) for item in manifest["factors"])
     assert manifest["spec"]["holding_period"] == "1M"
@@ -450,18 +451,18 @@ def test_report_engine_builds_static_report(tmp_path) -> None:
         "report.md", "report.html", "monthly.parquet", "summary.csv",
         "correlation.parquet", "combo.json", "spec.yaml",
     ):
-        assert (output / name).is_file()
-    markdown = (output / "report.md").read_text(encoding="utf-8")
+        assert storage_io.exists(output / name)
+    markdown = storage_io.read_text(output / "report.md", encoding="utf-8")
     assert "持有期：1M" in markdown
     assert "回看(日)" in markdown
     assert "测试与监控期仅评估" in markdown
     assert "测试期不调方向与参数" in markdown
-    html = (output / "report.html").read_text(encoding="utf-8")
+    html = storage_io.read_text(output / "report.html", encoding="utf-8")
     assert "研究设置" in html
     assert "echarts" in html
     assert "data-kind=\"correlation\"" in html
     assert "data-kind=\"combination\"" in html
-    combo = json.loads((output / "combo.json").read_text(encoding="utf-8"))
+    combo = json.loads(storage_io.read_text(output / "combo.json", encoding="utf-8"))
     assert set(combo["nav"]) == {"equal", "ic_decay"}
     assert combo["selection"]["selection_end"] == "2023-12-31"
     app = create_app(tmp_path)

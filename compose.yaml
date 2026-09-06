@@ -1,0 +1,24 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.18.1
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${MLQUANT_CLICKHOUSE_DATABASE:-mlquant}
+      CLICKHOUSE_USER: ${MLQUANT_CLICKHOUSE_USERNAME:-mlquant}
+      CLICKHOUSE_PASSWORD: ${MLQUANT_CLICKHOUSE_PASSWORD:?Set MLQUANT_CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "${MLQUANT_CLICKHOUSE_BIND:-127.0.0.1}:8123:8123"
+    volumes:
+      - ${MLQUANT_CLICKHOUSE_DATA_DIR:-./clickhouse-data}:/var/lib/clickhouse
+      - ${MLQUANT_CLICKHOUSE_BACKUP_DIR:-./clickhouse-backups}:/var/lib/clickhouse/backups
+      - ./config/clickhouse-server.xml:/etc/clickhouse-server/config.d/mlquant.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

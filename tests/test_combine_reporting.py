@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.combine import (
     METHODS,
     factor_weights,
@@ -40,12 +41,13 @@ def test_spearman_filter_keeps_stronger_factor_from_correlated_pair() -> None:
 
 
 def test_report_series_has_nine_reports_and_manifest(tmp_path) -> None:
-    manifest_path = build_series(tmp_path, smoke=True)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_path = build_series(tmp_path, smoke=True, include_pdf=True)
+    manifest = json.loads(storage_io.read_text(manifest_path, encoding="utf-8"))
     assert manifest["factor_count"] == 169
     assert manifest["watermark"] == "NON-FORMAL SMOKE"
-    assert len(list(tmp_path.glob("*.md"))) == 9
-    assert len(list(tmp_path.glob("*.pdf"))) == 9
-    assert (tmp_path / "factor_catalog.csv").exists()
-    assert (tmp_path / "factor_catalog.parquet").exists()
-    assert (tmp_path / "factor_catalog.png").exists()
+    assert len(list(storage_io.glob(tmp_path, "*.md"))) == 9
+    assert len(list(storage_io.glob(tmp_path, "*.pdf"))) == 9
+    assert storage_io.exists(tmp_path / "factor_catalog.csv")
+    assert storage_io.exists(tmp_path / "factor_catalog.parquet")
+    assert storage_io.exists(tmp_path / "factor_catalog.html")
+    assert not list(storage_io.glob(tmp_path, "*.png"))

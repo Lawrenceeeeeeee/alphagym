@@ -12,16 +12,19 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import StrictUndefined
 
+from mlquant import storage_io
 from mlquant.factor_research_service import AutoRunDataError, FactorResearchService
 from mlquant.factor_store import FactorStore
 from mlquant.factors.base import FactorDefinition
 from mlquant.factors.library import seed_definitions
+from mlquant.jobs import start_report
 from mlquant.report_spec import COMBINE_METHODS, DEFAULT_SPLITS, parse_spec, resolve_factors
+from mlquant.services import create_report as create_report_record
 
 FAMILY_LABELS = {
     "value": "估值",
@@ -130,9 +133,9 @@ def _text_list(value: str) -> list[str]:
 def _industry_options(data_root: Path) -> list[dict[str, str]]:
     """SW1 industry codes available in the data lake, for the report form."""
     path = data_root / "equity" / "industries.parquet"
-    if not path.is_file():
+    if not storage_io.exists(path):
         return []
-    frame = pd.read_parquet(path, columns=["industry_code", "industry_name"])
+    frame = storage_io.read_frame(path, columns=["industry_code", "industry_name"])
     rows = (
         frame.drop_duplicates("industry_code")
         .sort_values("industry_code")
@@ -310,9 +313,9 @@ def _attach_layered_backtests(
 
     for (run_id, index_code, value_type, orientation), variant in targets.items():
         path = nav_paths.get(run_id)
-        if path is None or not path.is_file():
+        if path is None or not storage_io.exists(path):
             continue
-        nav = nav_cache.setdefault(str(path), pd.read_parquet(path))
+        nav = nav_cache.setdefault(str(path), storage_io.read_frame(path))
         nav_index = "" if index_code == "全市场" else index_code
         sample = nav[
             (nav["factor_name"] == factor_id)
@@ -345,9 +348,9 @@ def _attach_layered_backtests(
 
     for run in metric_groups:
         path = performance_paths.get(run["run_id"])
-        if path is None or not path.is_file():
+        if path is None or not storage_io.exists(path):
             continue
-        performance = performance_cache.setdefault(str(path), pd.read_parquet(path))
+        performance = performance_cache.setdefault(str(path), storage_io.read_frame(path))
         performance = performance[performance["factor_name"] == factor_id]
         dimensions = ["index_code", "value_type", "orientation"]
         for keys, sample in performance.groupby(dimensions, observed=True, dropna=False):
@@ -546,7 +549,7 @@ def create_app(data_root: str | Path) -> FastAPI:
         )
 
     @app.get("/artifacts/{artifact_id}/view")
-    def view_artifact(artifact_id: str) -> FileResponse:
+    def view_artifact(artifact_id: str) -> Response:
         try:
             with FactorStore.from_root(root) as store:
                 artifact = store.artifact_detail(artifact_id)
@@ -555,22 +558,22 @@ def create_app(data_root: str | Path) -> FastAPI:
         path = Path(artifact["path"])
         if artifact["kind"] != "layered_nav_chart" or path.suffix.lower() != ".png":
             raise HTTPException(status_code=404, detail="artifact is not viewable")
-        if not path.is_file():
+        if not storage_io.exists(path):
             raise HTTPException(status_code=404, detail="artifact file is missing")
-        return FileResponse(path, media_type="image/png", filename=path.name)
+        return Response(storage_io.read_bytes(path), media_type="image/png")
 
     @app.get("/artifacts/{artifact_id}/download")
-    def download_artifact(artifact_id: str) -> FileResponse:
+    def download_artifact(artifact_id: str) -> Response:
         try:
             with FactorStore.from_root(root) as store:
                 artifact = store.artifact_detail(artifact_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="artifact not found") from error
         path = Path(artifact["path"])
-        if not path.is_file():
+        if not storage_io.exists(path):
             raise HTTPException(status_code=404, detail="artifact file is missing")
         media = _ARTIFACT_MEDIA.get(path.suffix.lower(), "application/octet-stream")
-        return FileResponse(path, media_type=media, filename=path.name)
+        return Response(storage_io.read_bytes(path), media_type=media)
 
     @app.get("/factors/{factor_id}/edit", response_class=HTMLResponse)
     def edit_factor(request: Request, factor_id: str) -> HTMLResponse:
@@ -606,7 +609,7 @@ def create_app(data_root: str | Path) -> FastAPI:
                 key: getattr(definition, key) for key in definition.__dataclass_fields__
             }
             return render(request, "factor_form.html", factor=factor, error=str(error))
-        if (root / "equity" / "daily.parquet").is_file():
+        if storage_io.exists(root / "equity" / "daily.parquet"):
             # New factors get their point-in-time values computed into the
             # factor-value cache in the background (space-for-time).
             subprocess.Popen(
@@ -701,9 +704,9 @@ def create_app(data_root: str | Path) -> FastAPI:
         """
         if report.get("path"):
             manifest_path = Path(str(report["path"])) / "manifest.json"
-            if manifest_path.is_file():
+            if storage_io.exists(manifest_path):
                 try:
-                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest = json.loads(storage_io.read_text(manifest_path, encoding="utf-8"))
                     if manifest.get("factors"):
                         return len(manifest["factors"])
                 except (OSError, ValueError):
@@ -812,13 +815,7 @@ def create_app(data_root: str | Path) -> FastAPI:
         try:
             spec = parse_spec(payload)
             with FactorStore.from_root(root) as store:
-                resolved = resolve_factors(store, spec.factors, index_code=spec.universe.index_code)
-                minimum = 1 if spec.combine is None else 2
-                if len(resolved) < minimum:
-                    if spec.combine is None:
-                        raise ValueError("报告至少需要 1 个因子")
-                    raise ValueError("报告至少需要 2 个因子（相关矩阵与合成对比依赖截面数据）")
-                report_id = store.create_report(spec.name, spec.to_dict())
+                report_id = create_report_record(store, spec)["report_id"]
         except (ValueError, TypeError, KeyError) as error:
             # Echo back the bound form values so a validation error keeps the
             # user's input (request.form() is async and cannot be awaited here).
@@ -851,15 +848,7 @@ def create_app(data_root: str | Path) -> FastAPI:
             )
             response.status_code = 422
             return response
-        command = [
-            sys.executable, "-m", "mlquant.cli", "report", "run",
-            "--root", str(root), "--report-id", report_id,
-        ]
-        subprocess.Popen(
-            command, cwd=str(Path.cwd()), stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        start_report(root, report_id)
         return RedirectResponse(f"/reports/{report_id}", status_code=303)
 
     @app.get("/reports/{report_id}", response_class=HTMLResponse)
@@ -873,33 +862,33 @@ def create_app(data_root: str | Path) -> FastAPI:
             return RedirectResponse(f"/reports/{report_id}/view", status_code=303)
         return render(request, "report_status.html", report=row)
 
-    @app.get("/reports/{report_id}/view", response_class=FileResponse)
-    def report_view(report_id: str) -> FileResponse:
+    @app.get("/reports/{report_id}/view", response_class=Response)
+    def report_view(report_id: str) -> Response:
         path = report_dir(report_id) / "report.html"
-        if not path.is_file():
+        if not storage_io.exists(path):
             raise HTTPException(status_code=404, detail="report html is not available")
-        return FileResponse(path, media_type="text/html")
+        return Response(storage_io.read_bytes(path), media_type="text/html")
 
     @app.get("/reports/{report_id}/files/{filename}")
-    def report_file(report_id: str, filename: str) -> FileResponse:
+    def report_file(report_id: str, filename: str) -> Response:
         directory = report_dir(report_id)
         manifest_path = directory / "manifest.json"
         allowed: set[str] = set()
-        if manifest_path.is_file():
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if storage_io.exists(manifest_path):
+            manifest = json.loads(storage_io.read_text(manifest_path, encoding="utf-8"))
             allowed = {str(name) for name in manifest.get("files", {})}
         # The manifest is written last and therefore never lists itself.
         allowed.add("manifest.json")
         if filename not in allowed:
             raise HTTPException(status_code=404, detail="report file not available")
         path = directory / filename
-        if not path.is_file():
+        if not storage_io.exists(path):
             raise HTTPException(status_code=404, detail="report file is missing")
         media = {
             ".png": "image/png", ".html": "text/html", ".md": "text/markdown",
             ".csv": "text/csv", ".json": "application/json", ".yaml": "text/yaml",
         }.get(path.suffix.lower(), "application/octet-stream")
-        return FileResponse(path, media_type=media, filename=path.name)
+        return Response(storage_io.read_bytes(path), media_type=media)
 
     @app.get("/api/reports/{report_id}/status")
     def report_status(report_id: str) -> dict[str, object]:

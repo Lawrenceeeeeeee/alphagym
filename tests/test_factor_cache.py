@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from mlquant import storage_io
 from mlquant.factor_cache import (
     FactorValueCache,
     _covers,
@@ -46,12 +47,12 @@ def _write_market_data(root) -> None:
             })
     equity = root / "equity"
     equity.mkdir(parents=True)
-    pd.DataFrame(rows).to_parquet(equity / "daily.parquet", index=False)
-    pd.DataFrame({
+    storage_io.write_frame(pd.DataFrame(rows), equity / "daily.parquet", index=False)
+    storage_io.write_frame(pd.DataFrame({
         "trade_date": [dates[0]] * len(symbols),
         "symbol": symbols,
         "adjust_factor": [1.0] * len(symbols),
-    }).to_parquet(equity / "adjustments.parquet", index=False)
+    }), equity / "adjustments.parquet", index=False)
 
 
 def _run_config(start: str, end: str) -> dict:
@@ -125,12 +126,14 @@ def test_store_read_and_revision_invalidation(tmp_path) -> None:
     assert list(after) == ["AUTO"]
     assert after["AUTO"].equals(values["AUTO"])
     cache.invalidate_if_stale()
-    # Touch a data file so the signature changes.
-    (tmp_path / "equity" / "adjustments.parquet").touch()
+    # Publishing a new database version invalidates the cache; touching a local
+    # filename has no bearing on the authoritative dataset.
+    path = tmp_path / "equity" / "adjustments.parquet"
+    storage_io.write_frame(storage_io.read_frame(path), path, index=False)
     assert cache.signature_matches() is False
     assert cache.invalidate_if_stale() is True
     assert cache.read_values(key, {"AUTO": revision}, start, end) == {}
-    manifest = json.loads(cache.manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads(storage_io.read_text(cache.manifest_path, encoding="utf-8"))
     assert manifest["data_signature"] == data_signature(tmp_path)
 
 
@@ -174,7 +177,7 @@ def _panel_frame(store: FactorStore, run_id: str) -> pd.DataFrame:
         (run_id,),
     ).fetchone()
     assert row is not None
-    return pd.read_parquet(row["path"])
+    return storage_io.read_frame(row["path"])
 
 
 def test_panel_identity_between_cached_and_fresh_paths(tmp_path) -> None:

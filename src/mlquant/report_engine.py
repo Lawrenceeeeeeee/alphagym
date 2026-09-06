@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -18,7 +17,7 @@ import pandas as pd
 import yaml
 from scipy.stats import spearmanr
 
-from mlquant import __version__
+from mlquant import __version__, storage_io
 from mlquant.combine import combine_scores, factor_weights, select_low_correlation_factors
 from mlquant.factor_cache import data_signature
 from mlquant.factor_research_service import FactorResearchService, _performance
@@ -80,11 +79,11 @@ METRIC_COLUMNS = (
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(storage_io.read_bytes(path)).hexdigest()
 
 
 def _static_text(name: str) -> str:
-    return (Path(__file__).parent / "static" / name).read_text(encoding="utf-8")
+    return storage_io.read_text(Path(__file__).parent / "static" / name, encoding="utf-8")
 
 
 def build_cross_section(
@@ -95,7 +94,7 @@ def build_cross_section(
     The old dashboard read the panel parquet once per factor; this reads it
     exactly once per report and splits by factor_name instead.
     """
-    long = pd.read_parquet(panel_path, columns=PANEL_COLUMNS)
+    long = storage_io.read_frame(panel_path, columns=PANEL_COLUMNS)
     long = long[long["factor_name"].isin(factor_ids)]
     long = long.drop_duplicates(["signal_date", "symbol", "factor_name"])
     long["signal_date"] = pd.to_datetime(long["signal_date"]).dt.normalize()
@@ -187,7 +186,9 @@ class ReportEngine:
     def reports_root(self) -> Path:
         return self.store.path.parent / "reports"
 
+    @storage_io.freeze_market
     def execute_report(self, report_id: str) -> Path:
+        self.store.claim_report(report_id)
         row = self.store.report_detail(report_id)
         try:
             spec = parse_spec(dict(row["spec"]))
@@ -248,9 +249,9 @@ class ReportEngine:
         if not codes:
             return
         path = self.data_root() / "equity" / "industries.parquet"
-        if not path.is_file():
+        if not storage_io.exists(path):
             raise ValueError("行业筛选需要 equity/industries.parquet（申万行业点位历史）")
-        frame = pd.read_parquet(path, columns=["industry_code"])
+        frame = storage_io.read_frame(path, columns=["industry_code"])
         known = set(frame["industry_code"].dropna().unique())
         unknown = sorted(codes - known)
         if unknown:
@@ -398,6 +399,8 @@ class ReportEngine:
             config = json.loads(run["config_json"]) if run.get("config_json") else None
             if not isinstance(config, dict):
                 return None
+            if config.get("data_version") != storage_io.current_version(self.store.path.parent.parent):
+                return None
             if config.get("index_code") != spec.universe.index_code:
                 return None
             if str(config.get("start_date", "")) > str(window_start.date()):
@@ -422,10 +425,10 @@ class ReportEngine:
         if panel_row is None:
             return None
         panel_path = Path(str(panel_row["path"]))
-        if not panel_path.is_file():
+        if not storage_io.exists(panel_path):
             return None
         panel_max = pd.to_datetime(
-            pd.read_parquet(panel_path, columns=["signal_date"])["signal_date"]
+            storage_io.read_frame(panel_path, columns=["signal_date"])["signal_date"]
         ).max()
         if pd.Timestamp(run_end) - panel_max > pd.Timedelta(days=30):
             return None
@@ -447,9 +450,9 @@ class ReportEngine:
         output = self.reports_root() / report_id
         output.mkdir(parents=True, exist_ok=True)
         run_dir = self.data_root() / "factor_library" / "runs" / run_id
-        shutil.copy2(run_dir / "monthly.parquet", output / "monthly.parquet")
-        shutil.copy2(run_dir / "summary.csv", output / "summary.csv")
-        (output / "spec.yaml").write_text(
+        storage_io.copy(run_dir / "monthly.parquet", output / "monthly.parquet")
+        storage_io.copy(run_dir / "summary.csv", output / "summary.csv")
+        storage_io.write_text(output / "spec.yaml",
             yaml.safe_dump(spec.to_dict(), allow_unicode=True, sort_keys=False),
             encoding="utf-8",
         )
@@ -467,7 +470,7 @@ class ReportEngine:
         with np.errstate(invalid="ignore"):
             average = np.nanmean(np.stack(matrices), axis=0)
         matrix = pd.DataFrame(average, index=z.columns, columns=z.columns)
-        matrix.to_parquet(output / "correlation.parquet", index=True)
+        storage_io.write_frame(matrix, output / "correlation.parquet", index=True)
         return matrix
 
     @staticmethod
@@ -668,7 +671,7 @@ class ReportEngine:
             },
             "nav": nav_payload,
         }
-        (output / "combo.json").write_text(
+        storage_io.write_text(output / "combo.json",
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str),
             encoding="utf-8",
         )
@@ -752,7 +755,7 @@ class ReportEngine:
         run_id: str, matrix: pd.DataFrame | None, combo: dict[str, Any] | None,
     ) -> None:
         metric_rows = self._metric_table(run_id, [item["factor_id"] for item in factors])
-        monthly = pd.read_parquet(output / "monthly.parquet")
+        monthly = storage_io.read_frame(output / "monthly.parquet")
         context = {
             "spec": spec,
             "factors": factors,
@@ -793,7 +796,7 @@ class ReportEngine:
             ),
         }
         markdown = _render_markdown(context)
-        (output / "report.md").write_text(markdown, encoding="utf-8")
+        storage_io.write_text(output / "report.md", markdown, encoding="utf-8")
         from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
         environment = Environment(
@@ -802,7 +805,7 @@ class ReportEngine:
         )
         environment.filters["fmt"] = _format_metric
         html = environment.get_template("report.html").render(**context)
-        (output / "report.html").write_text(html, encoding="utf-8")
+        storage_io.write_text(output / "report.html", html, encoding="utf-8")
 
     def _write_manifest(
         self, output: Path, spec: ReportSpec,
@@ -814,8 +817,8 @@ class ReportEngine:
         ).fetchall()
         revisions = {str(row["factor_id"]): str(row["revision_id"]) for row in revision_rows}
         files = {
-            path.name: {"sha256": _sha256(path), "bytes": path.stat().st_size}
-            for path in sorted(output.iterdir()) if path.is_file()
+            path.name: {"sha256": _sha256(path), "bytes": storage_io.stat(path).st_size}
+            for path in sorted(storage_io.iterdir(output)) if storage_io.exists(path)
         }
         manifest = {
             "report_id": output.name,
@@ -825,6 +828,8 @@ class ReportEngine:
             "code_version": __version__,
             "run_id": run_id,
             "spec": spec.to_dict(),
+            "storage_backend": "clickhouse",
+            "data_version": self.store.run_detail(run_id)["config"].get("data_version"),
             "factors": [
                 {
                     "factor_id": item["factor_id"], "name": item["name"],
@@ -840,7 +845,7 @@ class ReportEngine:
             "monitoring_2026_excluded_from_selection": True,
             "files": files,
         }
-        (output / "manifest.json").write_text(
+        storage_io.write_text(output / "manifest.json",
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )

@@ -22,6 +22,7 @@ from typing import Any
 
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.combine import combine_scores, factor_weights
 from mlquant.factor_store import FactorStore
 from mlquant.ml_composite import frozen_composite, load_pit_context, neutralize_wide
@@ -44,17 +45,13 @@ class SignalBundle:
 
 def _report_dir(root: Path, report_id: str) -> Path:
     directory = root / "factor_library" / "reports" / report_id
-    if not directory.is_dir():
+    if not storage_io.exists(directory / "manifest.json"):
         raise FileNotFoundError(f"报告产物不存在：{directory}")
     return directory
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return hashlib.sha256(storage_io.read_bytes(path)).hexdigest()
 
 
 def _open_dates(calendar: pd.DataFrame) -> pd.DatetimeIndex:
@@ -100,11 +97,11 @@ def _latest_scores(
     root: Path,
     smooth_months: int = 1,
 ) -> tuple[pd.Series, pd.Timestamp]:
-    manifest = json.loads((report_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(storage_io.read_text(report_dir / "manifest.json", encoding="utf-8"))
     run_id = str(manifest["run_id"])
     factor_ids = [str(item["factor_id"]) for item in manifest["factors"]]
     panel_path = root / "factor_library" / "generated_panels" / f"{run_id}.parquet"
-    if not panel_path.is_file():
+    if not storage_io.exists(panel_path):
         raise FileNotFoundError(f"报告关联的面板不存在：{panel_path}")
     wide, forward, z, ic, fm = build_cross_section(panel_path, factor_ids)
     months = sorted(wide.index.get_level_values("signal_date").unique())
@@ -159,16 +156,16 @@ def export_signal(
     report_dir = Path(str(row["path"]))
     spec = parse_spec(dict(row["spec"]))
     combo_path = report_dir / "combo.json"
-    if not combo_path.is_file():
+    if not storage_io.exists(combo_path):
         raise FileNotFoundError(f"报告缺少 combo.json（该报告未做合成对比）：{report_dir}")
-    combo = json.loads(combo_path.read_text(encoding="utf-8"))
+    combo = json.loads(storage_io.read_text(combo_path, encoding="utf-8"))
     known = {str(item["key"]) for item in combo.get("methods", [])}
     if method not in known:
         raise ValueError(f"combo.json 中不存在方法 {method}；可用：{sorted(known)}")
     scores, asof = _latest_scores(
         report_dir, spec, combo["selection"], method, root, smooth_months=smooth_months
     )
-    manifest = json.loads((report_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(storage_io.read_text(report_dir / "manifest.json", encoding="utf-8"))
     top = scores.dropna().sort_values(ascending=False).head(top_n)
     if top.empty:
         raise ValueError(f"{method} 在 {asof.date()} 无可用得分")
@@ -183,8 +180,8 @@ def export_signal(
     output = root / "qmt_signals" / f"{report_id[:8]}-{method}"
     output.mkdir(parents=True, exist_ok=True)
     signal_path = output / "signal_latest.csv"
-    target.to_csv(signal_path, index=False, encoding="utf-8-sig")
-    calendar = pd.read_parquet(root / "equity" / "calendar.parquet")
+    storage_io.write_csv(target, signal_path, index=False, encoding="utf-8-sig")
+    calendar = storage_io.read_frame(root / "equity" / "calendar.parquet")
     open_days = _open_dates(calendar)
     latest_data = open_days.max()
     effective_trade_date = _next_open_date(asof, calendar)
@@ -232,9 +229,12 @@ def export_signal(
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "watermark": WATERMARK,
     }
-    (output / "state.json").write_text(
+    storage_io.write_text(output / "state.json",
         json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
     )
+    # The QMT bridge consumes explicit exported files; ClickHouse remains authoritative.
+    storage_io.export_resource(signal_path, signal_path)
+    storage_io.export_resource(output / "state.json", output / "state.json")
     return SignalBundle(
         path=output,
         asof=asof,

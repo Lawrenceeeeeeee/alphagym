@@ -18,7 +18,7 @@ import pandas as pd
 import yaml
 
 from mlquant.factor_store import FactorStore
-from mlquant.ml_composite import FEATURE_MODES, LABEL_MODES, MODEL_KEYS
+from mlquant.model_catalog import FEATURE_MODES, LABEL_MODES, MODEL_KEYS
 
 DEFAULT_SPLITS = {
     "development": ("2014-01-01", "2020-12-31"),

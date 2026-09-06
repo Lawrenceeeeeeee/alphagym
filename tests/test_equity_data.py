@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from mlquant import storage_io
 from mlquant.equity_data import (
     _QMT_DAILY_DTYPE,
     DataContractError,
@@ -15,7 +16,7 @@ from mlquant.equity_data import (
 def test_bundle_audit_and_roundtrip(bundle: EquityDataBundle, tmp_path) -> None:
     assert bundle.audit(formal=False, index_code="000300.SH").ok
     manifest = bundle.build_snapshot(tmp_path / "equity", formal=False)
-    assert manifest.exists()
+    assert storage_io.exists(manifest)
 
 
 def test_formal_rejects_current_industry_snapshot(bundle: EquityDataBundle) -> None:

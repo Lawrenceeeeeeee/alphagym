@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from mlquant import storage_io
 from mlquant.factors import REGISTRY
 from mlquant.local_v0 import (
     FUNDAMENTAL_FACTORS,
@@ -103,9 +104,7 @@ def test_unknown_technical_direction_is_locked_from_development_only() -> None:
 
 
 def test_technical_report_contains_strategy_and_complete_backtest_metrics() -> None:
-    report = (
-        Path(__file__).parents[1] / "research" / "series" / "equity_v0_technical_factors.md"
-    ).read_text(encoding="utf-8")
+    report = storage_io.read_text(Path(__file__).parents[1] / "research" / "series" / "equity_v0_technical_factors.md", encoding="utf-8")
     required = {
         "纯多头",
         "不实际做空",

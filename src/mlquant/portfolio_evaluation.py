@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from mlquant import storage_io
 from mlquant.account import CashEquityLedger, FeeSchedule, next_open_date
 
 
@@ -48,12 +49,12 @@ def load_adjusted_market(
         filters.append(("trade_date", ">=", pd.Timestamp(start)))
     if end is not None:
         filters.append(("trade_date", "<=", pd.Timestamp(end)))
-    daily = pd.read_parquet(
+    daily = storage_io.read_frame(
         equity / "daily.parquet",
         columns=["trade_date", "symbol", "open", "close", "float_market_cap"],
         filters=filters or None,
     )
-    adjustments = pd.read_parquet(
+    adjustments = storage_io.read_frame(
         equity / "adjustments.parquet",
         columns=["trade_date", "symbol", "adjust_factor"],
     )
@@ -61,8 +62,8 @@ def load_adjusted_market(
         adjustments = adjustments[
             pd.to_datetime(adjustments["trade_date"]) <= pd.Timestamp(end)
         ]
-    calendar = pd.read_parquet(equity / "calendar.parquet")
-    status = pd.read_parquet(
+    calendar = storage_io.read_frame(equity / "calendar.parquet")
+    status = storage_io.read_frame(
         equity / "status.parquet",
         columns=["trade_date", "symbol", "is_suspended", "limit_up", "limit_down"],
         filters=filters or None,

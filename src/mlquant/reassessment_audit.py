@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from mlquant import storage_io
+
 
 def audit_reassessment_data(root: Path, *, index_code: str = "ALL_A") -> dict:
     equity = Path(root) / "equity"
@@ -23,26 +25,26 @@ def audit_reassessment_data(root: Path, *, index_code: str = "ALL_A") -> dict:
     if index_code != "ALL_A":
         required.append("index_members")
     for name in required:
-        if not (equity / f"{name}.parquet").is_file():
+        if not storage_io.exists(equity / f"{name}.parquet"):
             issue("MISSING_TABLE", f"Missing equity/{name}.parquet")
     metadata_path = equity / "metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
-    if not metadata_path.is_file():
+    metadata = json.loads(storage_io.read_text(metadata_path, encoding="utf-8")) if storage_io.exists(metadata_path) else {}
+    if not storage_io.exists(metadata_path):
         issue("MISSING_PROVENANCE", "Missing equity/metadata.json; formal provenance is unverified")
     if metadata.get("industry_snapshot_only") or "backfill" in str(
         metadata.get("sw1_gap_fill", "")
     ).lower():
         issue("NON_PIT_INDUSTRY", "Industry history contains a snapshot or backward-filled intervals")
-    if (equity / "industries.parquet").is_file():
-        industries = pd.read_parquet(equity / "industries.parquet")
+    if storage_io.exists(equity / "industries.parquet"):
+        industries = storage_io.read_frame(equity / "industries.parquet")
         bad = industries["industry_code"].isna() | industries["industry_code"].eq("UNKNOWN")
         if "source" in industries:
             bad |= industries["source"].eq("fallback")
         facts["unknown_industry_rows"] = int(bad.sum())
         if bad.any():
             issue("UNKNOWN_INDUSTRY", f"{int(bad.sum())} industry rows lack genuine PIT SW1 classification")
-    if (equity / "fundamentals.parquet").is_file():
-        financial = pd.read_parquet(equity / "fundamentals.parquet")
+    if storage_io.exists(equity / "fundamentals.parquet"):
+        financial = storage_io.read_frame(equity / "fundamentals.parquet")
         if "available_date" not in financial:
             issue("MISSING_FINANCIAL_AVAILABILITY", "Financial available_date is missing")
         else:
@@ -53,8 +55,8 @@ def audit_reassessment_data(root: Path, *, index_code: str = "ALL_A") -> dict:
             if bad.any():
                 issue("INVALID_FINANCIAL_AVAILABILITY", f"{int(bad.sum())} invalid financial dates")
         issue("FINANCIAL_VINTAGES_UNVERIFIED", "Fiscal-period deduplication in the importer discards revisions; source vintages must be verified", severity="warning")
-    if (equity / "index_members.parquet").is_file():
-        members = pd.read_parquet(equity / "index_members.parquet")
+    if storage_io.exists(equity / "index_members.parquet"):
+        members = storage_io.read_frame(equity / "index_members.parquet")
         for column in ("valid_from", "valid_to"):
             members[column] = pd.to_datetime(members[column])
         when = pd.Timestamp("2024-01-31")
@@ -91,7 +93,7 @@ def audit_reassessment_data(root: Path, *, index_code: str = "ALL_A") -> dict:
 def require_reassessment_data(root: Path, output: Path, *, index_code: str = "ALL_A") -> dict:
     result = audit_reassessment_data(root, index_code=index_code)
     output.mkdir(parents=True, exist_ok=True)
-    (output / f"audit_{index_code}.json").write_text(
+    storage_io.write_text(output / f"audit_{index_code}.json",
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     if not result["ok"]:
