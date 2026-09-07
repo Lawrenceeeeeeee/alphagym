@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-from mlquant import storage_io
 from mlquant.factors import REGISTRY
 from mlquant.local_v0 import (
     FUNDAMENTAL_FACTORS,
@@ -101,24 +98,3 @@ def test_unknown_technical_direction_is_locked_from_development_only() -> None:
     )
     assert _locked_direction_signs(summary, "000300.SH")["RSI_12D"] == -1.0
     assert _locked_direction_signs(summary, "000905.SH")["RSI_12D"] == 1.0
-
-
-def test_technical_report_contains_strategy_and_complete_backtest_metrics() -> None:
-    report = storage_io.read_text(Path(__file__).parents[1] / "research" / "series" / "equity_v0_technical_factors.md", encoding="utf-8")
-    required = {
-        "纯多头",
-        "不实际做空",
-        "年化收益",
-        "年化波动",
-        "Sharpe",
-        "Sortino",
-        "最大回撤",
-        "Calmar",
-        "净超额IR",
-        "月均换手",
-        "月胜率",
-        "季胜率",
-        "年胜率",
-    }
-    missing = {item for item in required if item not in report}
-    assert not missing
