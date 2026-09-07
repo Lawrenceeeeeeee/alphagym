@@ -1,10 +1,10 @@
 # coding: gbk
-"""MLQuant monthly paper-trading executor for QMT built-in Python.
+"""AlphaGYM monthly paper-trading executor for QMT built-in Python.
 
 This file targets the QMT strategy editor (innerApi), not MiniQMT/nativeApi.
 QMT calls ``init(ContextInfo)`` once and ``handlebar(ContextInfo)`` on market
 events. The terminal never computes factors; it loads a frozen signal bundle
-produced by ``mlquant signal export`` and verifies its factor provenance.
+produced by ``alphagym signal export`` and verifies its factor provenance.
 
 The source is ASCII-only so it can live in the Python 3.12 repository while
 also being pasted into QMT's Python 3.6/GBK editor.
@@ -40,7 +40,7 @@ TRADE_END = "145000"
 CASH_BUFFER_RATE = 0.005
 SUBMISSION_GRACE_SECONDS = 30
 POSITION_SYNC_GRACE_SECONDS = 10
-STRATEGY_NAME = "MLQuantPaper"
+STRATEGY_NAME = "AlphaGYMPaper"
 
 
 # Stable contracts and QMT constants ----------------------------------------
@@ -435,7 +435,7 @@ def _block(root, journal, message):
     journal["phase"] = "blocked"
     journal["message"] = message
     _save_journal(root, journal)
-    print(f"[MLQ][BLOCKED] {message}")
+    print(f"[AlphaGYM][BLOCKED] {message}")
 
 
 # QMT innerApi adapters -------------------------------------------------------
@@ -518,7 +518,7 @@ def _limit_price(quote, is_buy):
 
 def _order_remark(state, side, symbol):
     date_token = str(state["asof"]).replace("-", "")[2:]
-    return "MLQ{}{}{}".format(date_token, "B" if side == "buy" else "S", symbol[:6])
+    return "AGYM{}{}{}".format(date_token, "B" if side == "buy" else "S", symbol[:6])
 
 
 def _qmt_orders(account_id, account_type):
@@ -625,7 +625,7 @@ def _submit_order(context, root, journal, state, symbol, side, quantity, quote):
         return record["error"]
     record["status"] = "submitted"
     _save_journal(root, journal)
-    print(f"[MLQ] submitted {side} {symbol} {quantity} @ {price:.2f} remark={remark}")
+    print(f"[AlphaGYM] submitted {side} {symbol} {quantity} @ {price:.2f} remark={remark}")
     return None
 
 
@@ -704,11 +704,11 @@ def _write_dry_run(root, state, positions, equity, cash, prices):
         "skipped": skipped,
     }
     _atomic_write_json(Path(root) / "dry_run_plan.json", payload)
-    print("[MLQ][DRY_RUN] targets={} orders={} skipped={} output={}".format(
+    print("[AlphaGYM][DRY_RUN] targets={} orders={} skipped={} output={}".format(
         len(RUNTIME.targets), len(orders), len(skipped), Path(root) / "dry_run_plan.json"
     ))
     for symbol, side, shares in orders:
-        print(f"[MLQ][DRY_RUN] {side} {symbol} {shares}")
+        print(f"[AlphaGYM][DRY_RUN] {side} {symbol} {shares}")
 
 
 # QMT lifecycle --------------------------------------------------------------
@@ -734,14 +734,14 @@ def init(context):
         RUNTIME.account_id = account_id
         RUNTIME.account_type = account_type.upper()
         RUNTIME.ready = True
-        print("[MLQ] loaded report={} method={} asof={} effective={} factors={} targets={}".format(
+        print("[AlphaGYM] loaded report={} method={} asof={} effective={} factors={} targets={}".format(
             state["report_id"], state["method"], state["asof"],
             state["effective_trade_date"], len(state["factor_manifest"]), len(targets)
         ))
     except Exception as error:  # noqa: BLE001 - init must fail closed at the QMT boundary
         RUNTIME.error = repr(error)
         RUNTIME.ready = False
-        print(f"[MLQ][BLOCKED] init failed: {RUNTIME.error}")
+        print(f"[AlphaGYM][BLOCKED] init failed: {RUNTIME.error}")
 
 
 def handlebar(context):
@@ -787,7 +787,7 @@ def _execute_live_cycle(context, positions, equity, cash, prices):
     if journal is None:
         target_shares, missing = build_target_shares(RUNTIME.targets, prices, equity)
         if missing:
-            print("[MLQ][BLOCKED] missing target quotes: {}".format(",".join(sorted(missing))))
+            print("[AlphaGYM][BLOCKED] missing target quotes: {}".format(",".join(sorted(missing))))
             return
         journal = _new_journal(RUNTIME.state, target_shares)
         _save_journal(RUNTIME.root, journal)
@@ -879,10 +879,10 @@ def _execute_live_cycle(context, positions, equity, cash, prices):
     journal["status"] = "completed"
     _save_journal(RUNTIME.root, journal)
     mark_executed(RUNTIME.root, RUNTIME.state, journal=journal)
-    print("[MLQ] rebalance completed and reconciled")
+    print("[AlphaGYM] rebalance completed and reconciled")
 
 
 def _print_once(message):
     if RUNTIME.last_message != message:
-        print(f"[MLQ] {message}")
+        print(f"[AlphaGYM] {message}")
         RUNTIME.last_message = message

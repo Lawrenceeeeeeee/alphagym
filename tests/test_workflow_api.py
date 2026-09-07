@@ -7,9 +7,9 @@ import sys
 
 import pytest
 
-from mlquant import Workspace, storage_io
-from mlquant.cli import main
-from mlquant.workflows.catalog import WORKFLOWS, describe_workflow, list_workflows, run_workflow
+from alphagym import Workspace, storage_io
+from alphagym.cli import main
+from alphagym.workflows.catalog import WORKFLOWS, describe_workflow, list_workflows, run_workflow
 
 
 def test_workflow_discovery_covers_installed_configs(capsys):
@@ -17,7 +17,7 @@ def test_workflow_discovery_covers_installed_configs(capsys):
     for name, (module_name, _) in WORKFLOWS.items():
         description = describe_workflow(name)
         assert description["parameters"]
-        module = importlib.import_module(f"mlquant.workflows.{module_name}")
+        module = importlib.import_module(f"alphagym.workflows.{module_name}")
         with pytest.raises(SystemExit) as raised:
             module.main(["--help"])
         assert raised.value.code == 0
@@ -62,7 +62,7 @@ def test_workflow_cli_domain_error_is_structured(tmp_path, capsys):
 
 def test_workflow_modules_do_not_load_optional_models(tmp_path):
     code = (
-        "import sys; from mlquant.workflows.catalog import WORKFLOWS, describe_workflow; "
+        "import sys; from alphagym.workflows.catalog import WORKFLOWS, describe_workflow; "
         "[describe_workflow(name) for name in WORKFLOWS]; "
         "assert not {'sklearn','xgboost','lightgbm','matplotlib','reportlab','fastapi'} & set(sys.modules)"
     )
@@ -72,8 +72,8 @@ def test_workflow_modules_do_not_load_optional_models(tmp_path):
 
 
 def test_batch_failure_is_not_reported_as_success(tmp_path, monkeypatch):
-    from mlquant import FactorDefinition
-    from mlquant.workflows import backfill_factor_backtests as workflow
+    from alphagym import FactorDefinition
+    from alphagym.workflows import backfill_factor_backtests as workflow
 
     workspace = Workspace(tmp_path)
     workspace.initialize()

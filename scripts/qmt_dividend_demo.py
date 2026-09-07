@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from mlquant.equity_data import read_qmt_daily_dat
-from mlquant.qmt_dividend import build_adjustments, read_dividend_events
+from alphagym.equity_data import read_qmt_daily_dat
+from alphagym.qmt_dividend import build_adjustments, read_dividend_events
 
 
 def daily_frame(datadir: Path, symbol: str) -> pd.DataFrame:

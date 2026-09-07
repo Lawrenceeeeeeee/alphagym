@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mlquant.research import (
+from alphagym.research import (
     benjamini_hochberg,
     evaluate_factor_batch,
     evaluate_factor_suite,

@@ -50,7 +50,7 @@ jobs:
       - name: Exercise installed package outside source tree
         working-directory: ${{ runner.temp }}
         run: |
-          python -m mlquant factor list --json
+          python -m alphagym factor list --json
           python "$GITHUB_WORKSPACE/scripts/run_library_smoke.py" --background
   windows-package:
     runs-on: windows-latest
@@ -66,4 +66,4 @@ jobs:
           $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
           python -m pip install $wheel.FullName
       - working-directory: ${{ runner.temp }}
-        run: python -m mlquant --help
+        run: python -m alphagym --help

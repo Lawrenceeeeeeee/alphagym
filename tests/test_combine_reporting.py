@@ -5,14 +5,14 @@ import json
 import numpy as np
 import pandas as pd
 
-from mlquant import storage_io
-from mlquant.combine import (
+from alphagym import storage_io
+from alphagym.combine import (
     METHODS,
     factor_weights,
     select_low_correlation_factors,
     select_validation_method,
 )
-from mlquant.reporting import build_series
+from alphagym.reporting import build_series
 
 
 def test_all_combine_methods_are_long_only() -> None:

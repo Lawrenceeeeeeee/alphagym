@@ -1,0 +1,39 @@
+{% extends "base.html" %}{% block title %}{{ title }} · AlphaGYM{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <div><p class="eyebrow">REGISTRY</p><h1>{{ title }}</h1><p>公式只能调用这里登记并受版本约束的能力。</p></div>
+</section>
+<form class="filter" onsubmit="return false"><input type="search" id="capability-search" placeholder="{% if mode == 'operators' %}按算子名 / 签名 / 描述搜索{% else %}按字段名 / 数据集 / 列名搜索{% endif %}"></form>
+<div class="card-grid" id="capability-grid">
+{% for item in items %}
+<article class="panel capability-card">
+  <h2>{{ item.name }}</h2>
+  {% if mode == 'operators' %}
+  <p><span class="pill">v{{ item.version }}</span> <code>{{ item.code_hash[:12] }}</code>{% if item.deterministic %}<span class="pill">确定性</span>{% endif %}</p>
+  <pre class="capability-signature">{{ item.signature }}</pre>
+  <p>{{ item.description or '版本化确定性算子' }}</p>
+  {% else %}
+  <p><span class="pill">{{ item.dataset }}</span> {{ item.frequency }}{% if not item.formal %}<span class="pill">非正式</span>{% endif %}</p>
+  <p><code>{{ item.column }}</code>{% if item.unit %} · {{ item.unit }}{% endif %}</p>
+  <p>事件时间：{{ item.event_time }}{% if item.available_time %}；可得时间：{{ item.available_time }}{% endif %}</p>
+  <p>{{ item.description }}</p>
+  {% endif %}
+</article>
+{% endfor %}
+</div>
+<script>
+(function () {
+  var search = document.getElementById("capability-search");
+  if (!search) return;
+  search.addEventListener("input", function () {
+    var needle = this.value.toLowerCase();
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".capability-card"),
+      function (card) {
+        card.hidden = needle !== "" && card.textContent.toLowerCase().indexOf(needle) < 0;
+      }
+    );
+  });
+})();
+</script>
+{% endblock %}

@@ -1,14 +1,15 @@
-# MLQuant
+# AlphaGYM — Quant Research Toolbox
 
-[![CI](https://github.com/Lawrenceeeeeeee/mlquant/actions/workflows/ci.yml/badge.svg)](https://github.com/Lawrenceeeeeeee/mlquant/actions/workflows/ci.yml)
+[![CI](https://github.com/Lawrenceeeeeeee/alphagym/actions/workflows/ci.yml/badge.svg)](https://github.com/Lawrenceeeeeeee/alphagym/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![ClickHouse](https://img.shields.io/badge/ClickHouse-25.8-FFCC01?logo=clickhouse&logoColor=black)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-面向 A 股点时研究的因子工程平台。MLQuant 将数据接入、因子定义、五分组回测、
+可扩展的多市场、多资产量化研究工具箱。AlphaGYM 将数据接入、因子定义、回测、
 开发／验证／测试隔离和离线报告组织成可复现的 Python、CLI 与 Web 工作流。
+中国 A 股是当前首个完整落地的研究市场，不是产品的长期边界。
 
-![MLQuant 因子看板：AMIHUD_5D 五分组累计净值](docs/assets/factor-dashboard.png)
+![AlphaGYM 因子看板：AMIHUD_5D 五分组累计净值](docs/assets/factor-dashboard.png)
 
 > 上图由真实 A 股历史数据生成，用于展示研究系统的因子分层与报告能力；区间为
 > 2014–2025，曲线未扣交易成本，不构成投资建议或未来收益承诺。仓库不包含原始行情、
@@ -17,7 +18,7 @@
 ## 项目解决什么问题
 
 传统因子脚本容易把数据读取、公式、回测和报告混在一起，也很难证明历史结果没有使用
-未来信息。MLQuant 把研究过程拆成带版本的数据与计算契约：信号在月末收盘后形成，下一
+未来信息。AlphaGYM 把研究过程拆成带版本的数据与计算契约：信号在月末收盘后形成，下一
 交易日开盘成交；财务字段按可得日使用；模型选择只发生在开发与验证期，测试期只评估。
 
 ## 我的实现范围
@@ -56,7 +57,7 @@ flowchart LR
 
 ## 使用方法
 
-**完整教程：[从零开始使用 MLQuant](docs/getting-started.md)。**
+**完整教程：[从零开始使用 AlphaGYM](docs/getting-started.md)。**
 
 使用顺序：**安装 Python 3.12 → 获取代码 → 建立环境 → 启动 ClickHouse → 合成数据体验 → 配置数据根
 → 准备真实数据 → 回测和生成报告 → 阅读结果**。
@@ -89,8 +90,8 @@ python -m pip install .
 所有行情、财务、缓存和报告统一保存在 ClickHouse，Parquet 只用于显式导入导出。
 
 ```shell
-python -m mlquant --help
-python -m mlquant factor list --json
+python -m alphagym --help
+python -m alphagym factor list --json
 python scripts/run_library_smoke.py --background
 ```
 
@@ -101,7 +102,7 @@ python scripts/run_library_smoke.py --background
 
 ### 3. 开始自己的研究
 
-根据教程配置独立的 `MLQUANT_DATA_ROOT`，然后依次执行初始化、数据准备和报告流程。
+根据教程配置独立的 `ALPHAGYM_DATA_ROOT`，然后依次执行初始化、数据准备和报告流程。
 **安装软件不附带真实数据；QMT 导入也只生成日线与复权因子。** 不同研究所需的财务、
 行业和指数历史资料不同，不能直接跳过数据准备。
 
@@ -121,14 +122,14 @@ python scripts/run_library_smoke.py --background
 仅支持 Python 3.12。可选 Tushare 导入工具使用 `python -m pip install ".[data]"`。
 Web 使用 `.[web]`，sklearn 模型使用 `.[ml]`，XGBoost/LightGBM 使用 `.[boosting]`；
 完整开发环境使用 `pip install -e ".[dev]"`。基础安装无需这些额外依赖。
-通过 `--root` 或 shell 环境变量 `MLQUANT_DATA_ROOT` 指定本地数据根；`.env.example`
+通过 `--root` 或 shell 环境变量 `ALPHAGYM_DATA_ROOT` 指定本地数据根；`.env.example`
 仅为模板，普通 CLI 不自动加载 `.env`。不要把令牌、数据湖或报告放进 Git。
 
 ## Python 与 Agent 入口
 
 ```python
 from pathlib import Path
-from mlquant import Workspace
+from alphagym import Workspace
 
 workspace = Workspace(Path("/path/to/local/data"))
 print(workspace.status())        # 只读，不隐式创建数据库
@@ -141,10 +142,10 @@ factors = workspace.list_factors()
 ```
 
 ```shell
-mlquant workflow list --json
-mlquant workflow describe ml-exploration --json
-mlquant report create --root /path/to/local/data --spec /path/to/report.yaml --ensure-runs --run --json
-mlquant report wait --root /path/to/local/data --report-id <returned-id> --json
+alphagym workflow list --json
+alphagym workflow describe ml-exploration --json
+alphagym report create --root /path/to/local/data --spec /path/to/report.yaml --ensure-runs --run --json
+alphagym report wait --root /path/to/local/data --report-id <returned-id> --json
 ```
 
 这里的路径和 ID 需要替换；这些研究命令假设你已按教程初始化数据根并准备好输入。
@@ -167,7 +168,7 @@ mlquant report wait --root /path/to/local/data --report-id <returned-id> --json
 
 |目录|内容|
 |---|---|
-|`src/mlquant/`|数据契约、因子、模型、报告、CLI 与本地 Web|
+|`src/alphagym/`|数据契约、因子、模型、报告、CLI 与本地 Web|
 |`config/`|研究方法配置与示例，不包含实跑结果|
 |`scripts/`|本地导入、审计、研究与静态报告工具|
 |`tests/`|合成数据上的回归测试|

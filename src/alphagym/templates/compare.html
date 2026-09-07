@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}因子对比 · AlphaGYM{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <p class="eyebrow">EVIDENCE, NOT ELIMINATION</p>
+    <h1>因子并排对比</h1>
+    <p>对比只展示证据，不产生自动淘汰或入选结论。</p>
+  </div>
+</section>
+<form class="panel compare-form" method="get" action="/compare">
+  <label>选择因子<input type="search" id="factor-search" placeholder="按名称 / 类别 / ID 搜索"></label>
+  <label>点击选项即可多选，无需 Ctrl<select name="factor_id" id="factor-select" multiple size="10">
+    {% for factor in factors %}
+    <option value="{{ factor.factor_id }}" {% if factor.factor_id in selected_ids %}selected{% endif %}>{{ factor.name }} · {{ factor.family }} · {{ factor.factor_id }}</option>
+    {% endfor %}
+  </select></label>
+  <div class="actions">
+    <button class="button primary" type="submit">对比所选</button>
+    {% if selected_ids %}<a class="button" href="/compare">清空</a>{% endif %}
+  </div>
+</form>
+{% if selected %}
+<section class="panel">
+  <h2>指标并排对比（{{ selected | length }} 个因子）</h2>
+  {% if comparison %}
+  <div class="table-wrap compare-table-wrap">
+    <table class="compare-table">
+      <thead>
+        <tr><th>指标 · 阶段</th>{% for factor in selected %}<th><a href="/factors/{{ factor.factor_id }}">{{ factor.name }}</a></th>{% endfor %}</tr>
+        <tr class="meta"><th></th>{% for factor in selected %}<th><code>{{ factor.factor_id }}</code> · r{{ factor.revisions[0].revision_number }} · 回看 {{ factor.revisions[0].lookback_days }} 日 · {{ factor.expected_direction }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in comparison %}
+        <tr><th>{{ row.metric_label }} · {{ row.period_label }}</th>{% for cell in row.values %}<td class="{{ 'negative' if cell.negative else '' }}">{{ cell.text }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">指标来自各因子最近一次成功回测（原始值、原方向、5bps 成本）。年化收益与回撤为百分比口径。</p>
+  {% else %}
+  <p class="muted">所选因子暂无成功回测的指标记录，请先到研究任务页发起回测。</p>
+  {% endif %}
+</section>
+{% endif %}
+<script>
+(function () {
+  var search = document.getElementById("factor-search");
+  var select = document.getElementById("factor-select");
+  if (!search || !select) return;
+  search.addEventListener("input", function () {
+    var needle = this.value.toLowerCase();
+    Array.prototype.forEach.call(select.options, function (option) {
+      option.hidden = needle !== "" && option.text.toLowerCase().indexOf(needle) < 0;
+    });
+  });
+  select.addEventListener("mousedown", function (event) {
+    if (event.target.tagName === "OPTION") {
+      event.preventDefault();
+      event.target.selected = !event.target.selected;
+    }
+  });
+})();
+</script>
+{% endblock %}

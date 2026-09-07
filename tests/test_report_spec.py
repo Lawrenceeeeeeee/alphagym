@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from mlquant.factor_store import FactorStore
-from mlquant.factors.base import FactorDefinition
-from mlquant.report_spec import (
+from alphagym.factor_store import FactorStore
+from alphagym.factors.base import FactorDefinition
+from alphagym.report_spec import (
     FactorSelection,
     MetricFilter,
     load_spec,

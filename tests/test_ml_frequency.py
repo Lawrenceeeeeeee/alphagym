@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mlquant.ml_frequency import (
+from alphagym.ml_frequency import (
     add_financial_features,
     financial_events,
     forward_label_end_dates,
@@ -11,7 +11,7 @@ from mlquant.ml_frequency import (
     frequency_signal_dates,
     market_features,
 )
-from mlquant.portfolio_evaluation import performance_stats
+from alphagym.portfolio_evaluation import performance_stats
 
 
 def test_frequency_signal_dates_use_last_open_day() -> None:

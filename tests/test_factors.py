@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mlquant.factors import REGISTRY, FactorContext
-from mlquant.factors.compute import compute_factors
-from mlquant.factors.technical import (
+from alphagym.factors import REGISTRY, FactorContext
+from alphagym.factors.compute import compute_factors
+from alphagym.factors.technical import (
     BLOCKED_SOURCE_FACTORS,
     SOURCE_ALIASES,
     TECHNICAL_FACTOR_NAMES,

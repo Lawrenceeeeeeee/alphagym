@@ -9,16 +9,16 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from mlquant import storage_io
-from mlquant.factor_dsl import FormulaCompiler, FormulaError
-from mlquant.factor_operators import build_field_registry, build_operator_registry
-from mlquant.factor_research_service import FactorResearchService
-from mlquant.factor_store import FactorStore
-from mlquant.factor_web import create_app
-from mlquant.factors.base import FactorContext, FactorDefinition
-from mlquant.factors.library import seed_definitions
-from mlquant.report_engine import ReportEngine
-from mlquant.report_spec import parse_spec, resolve_factors
+from alphagym import storage_io
+from alphagym.factor_dsl import FormulaCompiler, FormulaError
+from alphagym.factor_operators import build_field_registry, build_operator_registry
+from alphagym.factor_research_service import FactorResearchService
+from alphagym.factor_store import FactorStore
+from alphagym.factor_web import create_app
+from alphagym.factors.base import FactorContext, FactorDefinition
+from alphagym.factors.library import seed_definitions
+from alphagym.report_engine import ReportEngine
+from alphagym.report_spec import parse_spec, resolve_factors
 
 
 def _definition(factor_id: str, formula: str) -> FactorDefinition:
@@ -277,7 +277,7 @@ def test_web_quick_run_defaults_to_formal_and_spawns_executor(tmp_path, monkeypa
         store.save_definition(_definition("AUTO", "=RETURN(market.adj_close, 5)"))
     spawns: list[list[str]] = []
     monkeypatch.setattr(
-        "mlquant.factor_web.subprocess.Popen",
+        "alphagym.factor_web.subprocess.Popen",
         lambda command, **kwargs: spawns.append(list(command)),
     )
     app = create_app(tmp_path)

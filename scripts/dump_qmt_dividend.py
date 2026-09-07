@@ -5,7 +5,7 @@ import argparse
 import struct
 from pathlib import Path
 
-from mlquant.qmt_dividend import iter_leveldb_records, parse_dividend_key
+from alphagym.qmt_dividend import iter_leveldb_records, parse_dividend_key
 
 
 def _printable(b: bytes, limit: int = 160) -> str:

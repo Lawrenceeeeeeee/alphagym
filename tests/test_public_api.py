@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlquant import (
+from alphagym import (
     DataContractError,
     EquityDataBundle,
     FactorDefinition,
@@ -17,10 +17,10 @@ from mlquant import (
     Workspace,
     storage_io,
 )
-from mlquant.cli import build_parser, main
-from mlquant.factor_store import FactorStore
-from mlquant.report_spec import FactorSelection
-from mlquant.serialization import dumps
+from alphagym.cli import build_parser, main
+from alphagym.factor_store import FactorStore
+from alphagym.report_spec import FactorSelection
+from alphagym.serialization import dumps
 
 
 def test_inspection_does_not_create_workspace(tmp_path):
@@ -32,12 +32,12 @@ def test_inspection_does_not_create_workspace(tmp_path):
 
 
 def test_root_is_explicit_and_environment_is_fallback(tmp_path, monkeypatch):
-    monkeypatch.delenv("MLQUANT_DATA_ROOT", raising=False)
+    monkeypatch.delenv("ALPHAGYM_DATA_ROOT", raising=False)
     with pytest.raises(DataContractError):
         Workspace()
     with pytest.raises(DataContractError):
         EquityDataBundle.from_root()
-    monkeypatch.setenv("MLQUANT_DATA_ROOT", str(tmp_path / "env"))
+    monkeypatch.setenv("ALPHAGYM_DATA_ROOT", str(tmp_path / "env"))
     assert Workspace().root == tmp_path / "env"
     assert Workspace(tmp_path).root == tmp_path
 
@@ -96,7 +96,7 @@ def test_strict_json_represents_missing_values():
 
 
 def test_cli_domain_error_has_json_and_exit_one(monkeypatch, capsys):
-    monkeypatch.delenv("MLQUANT_DATA_ROOT", raising=False)
+    monkeypatch.delenv("ALPHAGYM_DATA_ROOT", raising=False)
     assert main(["status", "--json"]) == 1
     output = capsys.readouterr()
     assert not output.out
@@ -136,8 +136,8 @@ def test_failed_wait_produces_a_domain_error(tmp_path, capsys):
 
 def test_imports_do_not_load_optional_dependencies(tmp_path):
     result = subprocess.run(
-        [sys.executable, "-c", ("import sys; from mlquant import Workspace; "
-         "from mlquant.cli import build_parser; build_parser(); "
+        [sys.executable, "-c", ("import sys; from alphagym import Workspace; "
+         "from alphagym.cli import build_parser; build_parser(); "
          "assert not {'sklearn','xgboost','lightgbm','fastapi','matplotlib','reportlab'} "
          "& set(sys.modules)")],
         cwd=tmp_path, capture_output=True, text=True, check=False,

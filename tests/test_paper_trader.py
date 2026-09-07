@@ -191,7 +191,7 @@ def test_submit_order_uses_fixed_price_and_persists_intent(
     )
     assert error is None
     assert calls[0][:7] == (23, 1101, "paper-account", "600000.SH", 11, 10.01, 100)
-    assert calls[0][7] == "MLQuantPaper"
+    assert calls[0][7] == "AlphaGYMPaper"
     assert calls[0][8] == 2
     persisted = json.loads((tmp_path / "execution_state.json").read_text(encoding="utf-8"))
     assert next(iter(persisted["orders"].values()))["status"] == "submitted"

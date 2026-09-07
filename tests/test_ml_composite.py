@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlquant.ml_composite import (
+from alphagym.ml_composite import (
     CompositeDataset,
     frozen_composite,
     load_panel_wide,

@@ -1,0 +1,48 @@
+{% extends "base.html" %}{% block title %}研究任务 · AlphaGYM{% endblock %}
+{% block content %}<section class="hero compact"><div><p class="eyebrow">IMMUTABLE RESEARCH RUNS</p><h1>研究任务</h1><p>默认发起正式回测，按因子所需输入做点时校验，缺数据即阻断；行业分层/中性化研究仍需完整历史申万行业与官方权重。</p></div></section>
+{% if error %}<div class="alert"><strong>暂时无法启动</strong><br>{{ error | friendly }}</div>{% endif %}
+{% if selected_factor_ids and not error %}<div class="shortcut-notice">已带入所选因子。你可以直接使用默认配置启动，或调整范围。</div>{% endif %}
+<form class="editor panel" method="post" action="/runs">
+  <label>股票池<select name="index_code"><option value="ALL_A">全A股</option><option value="000300.SH">沪深300</option><option value="000905.SH">中证500</option><option value="000852.SH">中证1000</option></select></label>
+  <label>回测级别<select name="mode"><option value="formal" selected>正式回测（formal）</option><option value="smoke">探索性回测（smoke）</option></select></label>
+  <label>开始日期<input type="date" name="start_date" value="{{ default_start_date }}" required></label>
+  <label>结束日期<input type="date" name="end_date" value="{{ default_end_date }}" max="2025-12-31" required></label>
+  <label class="wide">因子（点击切换，无需 Ctrl）<input type="search" id="factor-search" placeholder="按名称 / 类别 / ID 搜索"></label>
+  <label class="wide">已选 <span id="factor-count">0</span> 个<select name="factor_ids" id="factor-select" multiple size="8" required>{% for factor in factors %}<option value="{{ factor.factor_id }}" {% if factor.factor_id in selected_factor_ids %}selected{% endif %}>{{ factor.name }} · {{ factor.family }} · {{ factor.factor_id }}</option>{% endfor %}</select></label>
+  <p class="wide muted">行情、复权、财务和指数成分均由公式依赖自动解析；所选因子缺少的数据会在启动前明确列出。</p>
+  <div class="wide"><button class="button primary">开始回测</button></div>
+</form>
+<section class="panel"><h2>历史任务</h2>
+<form class="filter" method="get"><input type="search" name="q" value="{{ query }}" placeholder="搜索 run ID / 状态 / 错误信息"><button>搜索</button>{% if query %}<a class="button quiet" href="/runs">重置</a>{% endif %}</form>
+<div class="table-wrap"><table><thead><tr><th>运行</th><th>级别</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>
+{% for run in runs %}<tr><td><a href="/runs/{{ run.run_id }}"><code>{{ run.run_id[:12] }}</code></a></td><td>{{ '探索性回测' if run.mode=='smoke' else '正式回测' }}</td><td><span class="status {{ run.status }}">{{ run.status | status_zh }}</span></td><td>{% if run.status == 'succeeded' %}100%{% elif run.status in ('failed','cancelled') %}—{% else %}{{ (run.progress*100)|round|int }}%{% endif %}</td><td>{{ run.created_at | bjt }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% if pages > 1 %}<div class="pagination">{% if page > 1 %}<a class="button quiet" href="/runs?q={{ query | urlencode }}&page={{ page - 1 }}">上一页</a>{% endif %}<span>第 {{ page }} / {{ pages }} 页 · 共 {{ total_runs }} 个任务</span>{% if page < pages %}<a class="button quiet" href="/runs?q={{ query | urlencode }}&page={{ page + 1 }}">下一页</a>{% endif %}</div>{% endif %}
+</section>
+<script>
+(function () {
+  var search = document.getElementById("factor-search");
+  var select = document.getElementById("factor-select");
+  if (!search || !select) return;
+  function refreshCount() {
+    var count = select.selectedOptions.length;
+    var label = document.getElementById("factor-count");
+    if (label) label.textContent = count;
+  }
+  search.addEventListener("input", function () {
+    var needle = this.value.toLowerCase();
+    Array.prototype.forEach.call(select.options, function (option) {
+      option.hidden = needle !== "" && option.text.toLowerCase().indexOf(needle) < 0;
+    });
+  });
+  select.addEventListener("mousedown", function (event) {
+    if (event.target.tagName === "OPTION") {
+      event.preventDefault();
+      event.target.selected = !event.target.selected;
+      refreshCount();
+    }
+  });
+  refreshCount();
+})();
+</script>
+{% endblock %}

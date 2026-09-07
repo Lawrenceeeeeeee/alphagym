@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlquant.combine import ML_METHODS, factor_weights
+from alphagym.combine import ML_METHODS, factor_weights
 
 
 def _ic_history(months: int = 60) -> pd.DataFrame:

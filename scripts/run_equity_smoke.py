@@ -7,10 +7,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from mlquant.equity_data import EquityDataBundle
-from mlquant.factors import REGISTRY
-from mlquant.reporting import build_series
-from mlquant.research import huatai_industry_layers
+from alphagym.equity_data import EquityDataBundle
+from alphagym.factors import REGISTRY
+from alphagym.reporting import build_series
+from alphagym.research import huatai_industry_layers
 
 
 def synthetic_bundle() -> EquityDataBundle:
@@ -59,7 +59,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output")
     args = parser.parse_args()
-    output = Path(args.output) if args.output else Path(tempfile.mkdtemp(prefix="mlquant-equity-smoke-"))
+    output = Path(args.output) if args.output else Path(tempfile.mkdtemp(prefix="alphagym-equity-smoke-"))
     bundle = synthetic_bundle()
     for index in ("000300.SH", "000905.SH", "000852.SH"):
         bundle.audit(formal=False, index_code=index).require_ok()

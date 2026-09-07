@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}新建报告 · AlphaGYM{% endblock %}
+{% block content %}<section class="hero compact"><div><p class="eyebrow">NEW RESEARCH REPORT</p><h1>新建报告</h1><p>设定股票池、研究区间与开发/验证/测试划分、因子集合与合成方式。创建后在后台离线计算，完成后生成静态研报（markdown + html + 数据文件）。</p></div><a class="button" href="/reports">返回报告区</a></section>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+<form class="editor panel" method="post" action="/reports" id="report-form">
+<label>报告名称<input name="name" required placeholder="如：动量因子研究" value="{{ form.get('name', '') }}"></label>
+<label>模式<select name="mode"><option value="formal" {% if form.get('mode', 'formal') == 'formal' %}selected{% endif %}>正式（创建后执行点位审计）</option><option value="smoke" {% if form.get('mode', '') == 'smoke' %}selected{% endif %}>探索（带水印）</option></select></label>
+<label>持有期<select name="holding_period"><option value="1M" {% if form.get('holding_period', '1M') == '1M' %}selected{% endif %}>1M（月度：月末信号、次日开盘成交）</option></select></label>
+<label class="wide">说明<input name="description" placeholder="可选" value="{{ form.get('description', '') }}"></label>
+
+<label>指数<input name="index_code" value="{{ form.get('index_code', 'ALL_A') }}" placeholder="ALL_A / 000300.SH ..."></label>
+<label>包含行业（点击多选，无需 Ctrl）<select name="industry_include" multiple size="4">{% for item in industry_options %}<option value="{{ item.code }}" {% if item.code in form.get('industry_include', []) %}selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select></label>
+<label>排除行业（点击多选，无需 Ctrl）<select name="industry_exclude" multiple size="4">{% for item in industry_options %}<option value="{{ item.code }}" {% if item.code in form.get('industry_exclude', []) %}selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select></label>
+<label>包含代码（每行一个）<textarea name="symbol_include" rows="4" placeholder="600000.SH">{{ form.get('symbol_include', '') }}</textarea></label>
+<label>排除代码（每行一个）<textarea name="symbol_exclude" rows="4">{{ form.get('symbol_exclude', '') }}</textarea></label>
+<label class="wide">股票池 = 指数成分 ∩ 行业筛选 ∩ 代码清单；行业按申万一级点位历史（valid_from/valid_to）过滤。行业与代码的包含/排除列表不能有交集。</label>
+
+<label>研究开始<input type="date" name="start_date" value="{{ form.get('start_date', '2014-01-01') }}"></label>
+<label>研究结束<input type="date" name="end_date" value="{{ form.get('end_date', '2025-12-31') }}"></label>
+<label>监控期结束（可选，2026 起仅监控不参与选模）<input type="date" name="monitoring_end" value="{{ form.get('monitoring_end', '') }}"></label>
+<label>开发期开始<input type="date" name="dev_start" value="{{ form.get('dev_start', defaults.development[0]) }}"></label>
+<label>开发期结束<input type="date" name="dev_end" value="{{ form.get('dev_end', defaults.development[1]) }}"></label>
+<label>验证期开始<input type="date" name="val_start" value="{{ form.get('val_start', defaults.validation[0]) }}"></label>
+<label>验证期结束<input type="date" name="val_end" value="{{ form.get('val_end', defaults.validation[1]) }}"></label>
+<label>测试期开始<input type="date" name="test_start" value="{{ form.get('test_start', defaults.test[0]) }}"></label>
+<label>测试期结束<input type="date" name="test_end" value="{{ form.get('test_end', defaults.test[1]) }}"></label>
+<label class="wide">三段必须首尾相接：开发期从研究开始日起，测试期到研究结束日止。测试期不调方向与参数。</label>
+
+<label>类别（点击多选，无需 Ctrl）<select name="families" multiple size="4">{% for family in family_options %}<option value="{{ family }}" {% if family in form.get('families', []) %}selected{% endif %}>{{ family }}</option>{% endfor %}</select></label>
+<label>显式包含（每行一个因子 ID）<textarea name="include_factors" rows="4">{{ form.get('include_factors', '') }}</textarea></label>
+<label>排除（每行一个因子 ID）<textarea name="exclude_factors" rows="4">{{ form.get('exclude_factors', '') }}</textarea></label>
+<label>筛选指标<select name="metric_name"><option value="">（不启用）</option>{% for metric in metric_options %}<option value="{{ metric }}" {% if form.get('metric_name', '') == metric %}selected{% endif %}>{{ metric }}</option>{% endfor %}</select></label>
+<label>筛选阶段<select name="metric_period"><option value="development" {% if form.get('metric_period', 'development') == 'development' %}selected{% endif %}>开发期</option><option value="validation" {% if form.get('metric_period', '') == 'validation' %}selected{% endif %}>验证期</option></select></label>
+<label>筛选条件<select name="metric_op"><option value="&gt;=" {% if form.get('metric_op', '>=') == '>=' %}selected{% endif %}>≥</option><option value="&gt;" {% if form.get('metric_op', '') == '>' %}selected{% endif %}>＞</option><option value="&lt;=" {% if form.get('metric_op', '') == '<=' %}selected{% endif %}>≤</option><option value="&lt;" {% if form.get('metric_op', '') == '<' %}selected{% endif %}>＜</option></select></label>
+<label>筛选阈值<input type="number" name="metric_value" step="0.001" value="{{ form.get('metric_value', '0.02') }}"></label>
+<label>按指标排序取前 N<input type="number" name="top_n" min="1" value="{{ form.get('top_n', '20') }}"></label>
+<label>排序指标<select name="sort_metric"><option value="">（默认 rank_ic）</option>{% for metric in metric_options %}<option value="{{ metric }}" {% if form.get('sort_metric', 'rank_ic') == metric %}selected{% endif %}>{{ metric }}</option>{% endfor %}</select></label>
+<label>排序阶段<select name="sort_period"><option value="development" {% if form.get('sort_period', '') == 'development' %}selected{% endif %}>开发期</option><option value="validation" {% if form.get('sort_period', 'validation') == 'validation' %}selected{% endif %}>验证期</option></select></label>
+<label>排序方向<select name="direction"><option value="abs" {% if form.get('direction', 'abs') == 'abs' %}selected{% endif %}>按绝对值</option><option value="desc" {% if form.get('direction', '') == 'desc' %}selected{% endif %}>降序</option><option value="asc" {% if form.get('direction', '') == 'asc' %}selected{% endif %}>升序</option></select></label>
+<label class="wide">指标筛选与排序只在开发/验证期确定（测试期与全样本不可参与选模），作用于每个因子最近一次成功回测的原始值指标；至少提供类别、显式列表、指标筛选或排序取前 N 之一。显式包含的因子始终保留。</label>
+
+<label>合成对比<input type="checkbox" name="combine_enabled" {% if submitted %}{% if form.get('combine_enabled', '') %}checked{% endif %}{% else %}checked{% endif %}></label>
+<label>合成方法（点击多选，无需 Ctrl）<select name="combine_methods" multiple size="5">{% for method in combine_methods %}<option value="{{ method }}" {% if (submitted and method in form.get('combine_methods', [])) or (not submitted and method != 'pca') %}selected{% endif %}>{{ method }}</option>{% endfor %}</select></label>
+<label>相关阈值<input type="number" name="correlation_threshold" step="0.05" min="0.1" max="1" value="{{ form.get('correlation_threshold', '0.8') }}"></label>
+<label>滚动窗口（月）<input type="number" name="rolling_months" min="2" value="{{ form.get('rolling_months', '12') }}"></label>
+<label>最少观测<input type="number" name="min_observations" min="3" value="{{ form.get('min_observations', '20') }}"></label>
+<label class="wide">开启合成对比需至少 2 个因子；关闭后仅需 1 个因子，不生成相关矩阵与合成对比。方向符号、去相关筛选、合成权重与方法只在开发+验证期确定（截至验证期末），测试与监控期仅评估。</label>
+
+<div class="actions wide"><button class="button primary" type="submit">创建并开始计算</button></div>
+</form>
+<script>
+(function () {
+  var form = document.getElementById("report-form");
+  if (!form) return;
+  function selectedValues(name) {
+    return Array.prototype.map.call(
+      form.querySelectorAll('select[name="' + name + '"] option:checked'),
+      function (option) { return option.value; }
+    );
+  }
+  function overlap(first, second) {
+    var present = new Set(first);
+    return second.filter(function (value) { return present.has(value); });
+  }
+  form.addEventListener("submit", function (event) {
+    var clash = overlap(
+      selectedValues("industry_include"), selectedValues("industry_exclude")
+    );
+    if (clash.length) {
+      event.preventDefault();
+      alert("行业包含与排除存在交集：" + clash.join("、"));
+      return;
+    }
+    var symbols = [
+      form.symbol_include.value.split(/\s+/),
+      form.symbol_exclude.value.split(/\s+/),
+    ];
+    var symbolClash = overlap(symbols[0], symbols[1]);
+    if (symbolClash.length) {
+      event.preventDefault();
+      alert("代码包含与排除存在交集：" + symbolClash.join("、"));
+    }
+  });
+  ["industry_include", "industry_exclude", "families", "combine_methods"].forEach(function (name) {
+    var select = form.querySelector('select[name="' + name + '"]');
+    if (!select) return;
+    select.addEventListener("mousedown", function (event) {
+      if (event.target.tagName === "OPTION") {
+        event.preventDefault();
+        event.target.selected = !event.target.selected;
+      }
+    });
+  });
+})();
+</script>{% endblock %}

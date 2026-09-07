@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mlquant.account import CashEquityLedger, FeeSchedule, next_open_date
-from mlquant.reconciliation import replay_filled_trades, vectorbt_replay_single_symbol
+from alphagym.account import CashEquityLedger, FeeSchedule, next_open_date
+from alphagym.reconciliation import replay_filled_trades, vectorbt_replay_single_symbol
 
 
 def market(price: float = 10.0, **kwargs) -> pd.DataFrame:

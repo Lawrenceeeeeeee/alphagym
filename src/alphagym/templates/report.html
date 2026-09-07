@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ spec.name }} · AlphaGYM 研究报告</title>
+<style>
+:root {
+  --ink: #1c2320; --muted: #5b6560; --line: #d9ddd7;
+  --paper: #fffef9; --accent: #27835b; --warn: #b42318;
+  --code-bg: #f2f4ef;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #f4f5f1; color: var(--ink);
+  font: 15px/1.65 "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+main { max-width: 1120px; margin: 0 auto; padding: 28px 20px 60px; }
+header.hero {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 10px; padding: 26px 30px; margin-bottom: 22px;
+}
+.eyebrow { letter-spacing: .12em; color: var(--accent); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+h1 { margin: 4px 0 8px; font-size: 26px; }
+.watermark {
+  display: inline-block; color: var(--warn); border: 1px solid var(--warn);
+  border-radius: 999px; padding: 2px 12px; font-size: 12px; font-weight: 700;
+  margin-top: 6px;
+}
+h2 { font-size: 18px; margin: 30px 0 10px; padding-left: 10px; border-left: 4px solid var(--accent); }
+.panel {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 10px; padding: 18px 22px; margin-bottom: 18px;
+}
+ul.settings { margin: 0; padding-left: 20px; }
+ul.settings li { margin: 3px 0; }
+code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; font-size: 13px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { color: var(--muted); font-weight: 600; border-bottom: 2px solid var(--line); }
+td.positive { color: var(--accent); font-weight: 600; }
+td.negative { color: var(--warn); }
+.table-wrap { overflow-x: auto; }
+img.dashboard-image { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+p.muted { color: var(--muted); font-size: 13px; }
+nav.report-toolbar {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  margin-bottom: 18px; font-size: 13px;
+}
+nav.report-toolbar a {
+  color: var(--ink); text-decoration: none; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px;
+}
+nav.report-toolbar a:hover { border-color: var(--accent); color: var(--accent); }
+nav.report-toolbar .spacer { flex: 1; }
+footer { color: var(--muted); font-size: 12.5px; margin-top: 26px; text-align: center; }
+footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<nav class="report-toolbar">
+  <a href="../">← 返回报告区</a>
+  <a href="/runs/{{ run_id }}">运行详情</a>
+  <span class="spacer"></span>
+  <a href="files/monthly.parquet">monthly.parquet</a>
+  <a href="files/summary.csv">summary.csv</a>
+  <a href="files/spec.yaml">spec.yaml</a>
+  <a href="files/manifest.json">manifest.json</a>
+</nav>
+<header class="hero">
+  <p class="eyebrow">ALPHAGYM RESEARCH REPORT</p>
+  <h1>{{ spec.name }}</h1>
+  {% if spec.description %}<p>{{ spec.description }}</p>{% endif %}
+  {% if spec.mode == 'smoke' %}<span class="watermark">NON-FORMAL SMOKE · 探索性回测</span>{% endif %}
+</header>
+
+<section class="panel">
+  <h2>研究设置</h2>
+  <ul class="settings">
+    <li><strong>股票池：</strong>{{ spec.universe.index_code }}
+      {%- if spec.universe.industries.get('include') %}（行业含 {{ spec.universe.industries.include | join('、') }}）{% endif %}
+      {%- if spec.universe.industries.get('exclude') %}（行业除 {{ spec.universe.industries.exclude | join('、') }}）{% endif %}
+      {%- if spec.universe.symbols.get('include') %}（代码含 {{ spec.universe.symbols.include | join('、') }}）{% endif %}
+      {%- if spec.universe.symbols.get('exclude') %}（代码除 {{ spec.universe.symbols.exclude | join('、') }}）{% endif %}
+    </li>
+    <li><strong>研究区间：</strong>{{ spec.start_date }} ~ {{ spec.end_date }}{% if monitoring %}，监控期至 {{ monitoring_end }}（不参与选模）{% endif %}</li>
+    <li><strong>阶段划分：</strong>开发 {{ split_ranges.development[0] }} ~ {{ split_ranges.development[1] }}；验证 {{ split_ranges.validation[0] }} ~ {{ split_ranges.validation[1] }}；测试 {{ split_ranges.test[0] }} ~ {{ split_ranges.test[1] }}</li>
+    <li><strong>持有期：</strong>{{ holding_period }}（月末收盘形成信号、下一交易日开盘成交、持有至下月信号执行日）</li>
+    <li><strong>因子回看：</strong>最长 {{ max_lookback_days }} 个交易日（各因子回看天数见单因子表）</li>
+    <li><strong>因子：</strong>{{ factors | length }} 个 · run <code>{{ run_id[:8] }}</code></li>
+  </ul>
+</section>
+
+{% if metric_rows %}
+<section class="panel">
+  <h2>单因子指标</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>因子</th><th>阶段</th><th>回看(日)</th><th>Rank IC</th><th>ICIR</th><th>HAC t</th><th>单调性</th><th>覆盖率</th><th>组合1年化</th><th>Sharpe</th><th>最大回撤</th><th>月胜率</th><th>换手</th></tr></thead>
+    <tbody>
+    {% for row in metric_rows %}
+      <tr>
+        <td>{{ row.factor_id }}</td>
+        <td>{{ period_labels.get(row.period, row.period) }}</td>
+        <td>{{ lookback_by_factor.get(row.factor_id) if lookback_by_factor.get(row.factor_id) is not none else '—' }}</td>
+        <td class="{{ 'positive' if row.get('rank_ic') is not none and row.rank_ic > 0 else ('negative' if row.get('rank_ic') is not none else '') }}">{{ 'rank_ic' | fmt(row.get('rank_ic')) }}</td>
+        <td>{{ 'icir' | fmt(row.get('icir')) }}</td>
+        <td>{{ 'hac_t' | fmt(row.get('hac_t')) }}</td>
+        <td>{{ 'monotonicity' | fmt(row.get('monotonicity')) }}</td>
+        <td>{{ 'coverage' | fmt(row.get('coverage')) }}</td>
+        <td>{{ 'annualized_return' | fmt(row.get('annualized_return')) }}</td>
+        <td>{{ 'sharpe' | fmt(row.get('sharpe')) }}</td>
+        <td>{{ 'max_drawdown' | fmt(row.get('max_drawdown')) }}</td>
+        <td>{{ 'monthly_win_rate' | fmt(row.get('monthly_win_rate')) }}</td>
+        <td>{{ 'mean_turnover' | fmt(row.get('mean_turnover')) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">指标来自本报告专属 run 的原始值（未中性化）方向；组合1为高因子值组并扣除 5bps 单边成本。</p>
+</section>
+{% endif %}
+
+{% if matrix is not none %}
+<section class="panel">
+  <h2>Spearman 相关系数矩阵</h2>
+  {% if correlation_chart %}
+  <div class="echarts-report" data-kind="correlation" data-series="{{ correlation_chart | tojson | forceescape }}" style="height: {{ [520, 90 + matrix_size * 42] | max }}px"></div>
+  {% endif %}
+  <p class="muted">每个自然月内先对因子做截面标准化，再计算两两 Spearman 秩相关，图上为各月平均值（{{ matrix_size }} 个因子）。矩阵数据：<a href="files/correlation.parquet">correlation.parquet</a>。</p>
+</section>
+{% endif %}
+
+{% if combo is not none and combo_methods %}
+<section class="panel">
+  <h2>不同因子组合方式的结果比较</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>合成方式</th><th>组合1年化</th><th>组合2年化</th><th>组合3年化</th><th>组合4年化</th><th>组合5年化</th><th>分层回测最优组合Sharpe</th><th>多空年化</th><th>多空Sharpe</th><th>多空回撤</th><th>Rank IC</th><th>ICIR</th><th>HAC t</th><th>开发IC</th><th>验证IC</th><th>测试IC</th><th>监控IC</th></tr></thead>
+    <tbody>
+    {% for row in combo_methods %}
+      <tr>
+        <td>{{ row.label }}</td>
+        {% for gi in range(1, 6) %}
+        <td>{% if row.get('best_group_index') == gi %}<strong>{{ 'annualized_return' | fmt(row.get('group_' ~ gi ~ '_annualized_return')) }}</strong>{% else %}{{ 'annualized_return' | fmt(row.get('group_' ~ gi ~ '_annualized_return')) }}{% endif %}</td>
+        {% endfor %}
+        <td>{{ 'sharpe' | fmt(row.get('best_group_sharpe')) }}</td>
+        <td>{{ 'annualized_return' | fmt(row.get('long_short_annualized_return')) }}</td>
+        <td>{{ 'sharpe' | fmt(row.get('long_short_sharpe')) }}</td>
+        <td>{{ 'max_drawdown' | fmt(row.get('long_short_max_drawdown')) }}</td>
+        <td>{{ 'rank_ic' | fmt(row.get('rank_ic')) }}</td>
+        <td>{{ 'icir' | fmt(row.get('icir')) }}</td>
+        <td>{{ 'hac_t' | fmt(row.get('hac_t')) }}</td>
+        <td>{{ 'rank_ic' | fmt(row.periods.get('development')) }}</td>
+        <td>{{ 'rank_ic' | fmt(row.periods.get('validation')) }}</td>
+        <td>{{ 'rank_ic' | fmt(row.periods.get('test')) }}</td>
+        <td>{{ 'rank_ic' | fmt(row.periods.get('monitoring_2026')) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if combo_chart %}
+  <div class="echarts-report" data-kind="combination" data-series="{{ combo_chart | tojson | forceescape }}" style="height: 400px"></div>
+  {% endif %}
+  <p class="muted">
+    口径：方向符号、去相关筛选、合成权重与方法只在
+    {% for item in combo.selection.selection_periods %}{{ period_labels.get(item, item) }}{% if not loop.last %}、{% endif %}{% endfor %}
+    期确定（截至 {{ combo.selection.selection_end }}），测试与监控期仅评估；滚动窗口 {{ combo.selection.rolling_months }} 个月，
+    相关阈值 {{ combo.selection.correlation_threshold }}，入选因子 {{ combo.selection.selected_factors | length }} 个。
+    数值见 <a href="files/combo.json">combo.json</a>。
+  </p>
+</section>
+{% endif %}
+
+<footer>AlphaGYM 报告引擎 v{{ version }} · run <a href="/runs/{{ run_id }}">{{ run_id }}</a> · 静态产物，不随点击重新计算</footer>
+</main>
+<script>{{ echarts_js | safe }}</script>
+<script>{{ charts_js | safe }}</script>
+</body>
+</html>

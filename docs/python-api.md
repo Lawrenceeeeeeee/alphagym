@@ -1,6 +1,6 @@
 # Python 库接口
 
-还没有安装环境或数据？先按 [从零开始使用 MLQuant](getting-started.md) 完成准备。
+还没有安装环境或数据？先按 [从零开始使用 AlphaGYM](getting-started.md) 完成准备。
 本文代码中的 `workspace` 与数据路径沿用已初始化的本地工作区。
 
 仅支持 Python 3.12。`pip install .` 安装数据、因子、基础合成和静态报告能力。
@@ -12,7 +12,7 @@
 
 ```python
 from pathlib import Path
-from mlquant import Workspace, WorkspaceConfig
+from alphagym import Workspace, WorkspaceConfig
 
 workspace = Workspace(WorkspaceConfig(root=Path("/path/to/local/data")))
 print(workspace.status())       # 不创建目录或数据库
@@ -21,16 +21,16 @@ factors = workspace.list_factors(family="momentum")
 print(factors[0]["factor_id"])
 ```
 
-也可直接 `Workspace(Path(...))`，或 `Workspace()` 从 `MLQUANT_DATA_ROOT` 读取。
+也可直接 `Workspace(Path(...))`，或 `Workspace()` 从 `ALPHAGYM_DATA_ROOT` 读取。
 显式参数优先，不自动加载 `.env`，不退回当前目录。对象不持有常驻数据库连接；每个
 方法负责打开和关闭连接。列表、状态和详情使用只读连接，不升级数据库。
 旧目录升级先显式执行 `initialize()`。`list_factors()` 需要已初始化的因子库。
-无数据根的内置定义发现使用 `mlquant factor list --json`。
+无数据根的内置定义发现使用 `alphagym factor list --json`。
 
 ## 注册和回测
 
 ```python
-from mlquant import FactorDefinition
+from alphagym import FactorDefinition
 
 workspace.save_factor(FactorDefinition(
     factor_id="CUSTOM_RETURN_20D", name="CUSTOM_RETURN_20D",
@@ -48,7 +48,7 @@ print(workspace.run(run["run_id"]))
 `run_factors()` 是同步、原始值五分组回测，按因子输入校验点时数据。量价因子需要
 日线和独立累计后复权因子；财务、指数池分别增加可得日和历史成分要求。正式行业
 中性化研究还要求历史申万一级行业与历史基准权重。缺失会抛错，不会回填快照。
-`save_factor()` 不隐式启动缓存任务；需要缓存时使用 `mlquant.factor_cache.build_factor_cache`。
+`save_factor()` 不隐式启动缓存任务；需要缓存时使用 `alphagym.factor_cache.build_factor_cache`。
 
 ## 离线报告
 
@@ -76,15 +76,15 @@ manifest = workspace.report_manifest(task["report_id"])
 
 |模块|用途|
 |---|---|
-|`mlquant.factors` / `mlquant.factors.base`|FactorRegistry、定义、计算上下文|
-|`mlquant.factors.compute.compute_factors`|从日线、财务表与信号日期计算因子|
-|`mlquant.research`|截面处理、分组和统计检验|
-|`mlquant.pipeline` / `mlquant.account`|组合和成交记账|
-|`mlquant.ml_composite`|冻结模型、隔离开发/验证/测试|
-|`mlquant.ingest.import_qmt`|流式导入 QMT，不依赖 CLI，不自动重建缓存|
-|`mlquant.factor_store.FactorStore`|高级目录管理，支持上下文管理器和 readonly=True|
-|`mlquant.serialization.dumps`|严格 JSON，NaN/Infinity/缺失时间转 null|
-|`mlquant.workflows.catalog`|发现、描述和运行九条可配置研究工作流|
+|`alphagym.factors` / `alphagym.factors.base`|FactorRegistry、定义、计算上下文|
+|`alphagym.factors.compute.compute_factors`|从日线、财务表与信号日期计算因子|
+|`alphagym.research`|截面处理、分组和统计检验|
+|`alphagym.pipeline` / `alphagym.account`|组合和成交记账|
+|`alphagym.ml_composite`|冻结模型、隔离开发/验证/测试|
+|`alphagym.ingest.import_qmt`|流式导入 QMT，不依赖 CLI，不自动重建缓存|
+|`alphagym.factor_store.FactorStore`|高级目录管理，支持上下文管理器和 readonly=True|
+|`alphagym.serialization.dumps`|严格 JSON，NaN/Infinity/缺失时间转 null|
+|`alphagym.workflows.catalog`|发现、描述和运行九条可配置研究工作流|
 
 Python API 保留原生异常：`DataContractError`、`ValueError`、`KeyError`、
 `FileNotFoundError`、`TimeoutError`；缺少可选依赖抛 `OptionalDependencyError`，带安装提示。

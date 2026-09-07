@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ factor.name }} · AlphaGYM{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">{{ factor.family }} / {{ factor.hypothesis_id }}</p><h1>{{ factor.name }}</h1><p>{{ factor.description }}</p></div>
+<div class="actions"><form class="quick-run-form" method="post" action="/runs/quick"><input type="hidden" name="factor_id" value="{{ factor.factor_id }}"><button class="button primary" type="submit">一键回测</button></form><a class="button" href="/runs?factor_id={{ factor.factor_id }}">自定义回测</a><a class="button" href="/factors/{{ factor.factor_id }}/edit">编辑并生成新版本</a></div></section>
+{% set revision=factor.revisions[0] %}
+<section class="formula-card"><span>当前公式 · revision {{ revision.revision_number }}</span><code>{{ revision.formula_source }}</code></section>
+<div class="grid two"><section class="panel"><h2>定义信息</h2><dl><dt>方向</dt><dd>{{ factor.expected_direction }}</dd><dt>状态</dt><dd>{{ factor.status }}</dd><dt>回看</dt><dd>{{ revision.lookback_days }} 日</dd><dt>定义摘要</dt><dd><code>{{ revision.definition_hash[:16] }}</code></dd></dl></section>
+<section class="panel"><h2>锁定依赖</h2>
+{% if factor.locked_fields %}<p><strong>字段：</strong>{% for name in factor.locked_fields %}<code>{{ name }}</code> {% endfor %}</p>{% endif %}
+{% if factor.locked_operators %}<p><strong>算子：</strong>{% for item in factor.locked_operators %}<code>{{ item.name }}@v{{ item.version }}</code> {% endfor %}</p>{% endif %}
+{% if factor.locked_models %}<p><strong>模型：</strong>{% for model_id, version in factor.locked_models %}<code>{{ model_id }}@{{ version[:8] }}</code> {% endfor %}</p>{% endif %}
+{% if factor.dependencies %}<p><strong>因子依赖：</strong></p>{% for item in factor.dependencies %}<p><a href="/factors/{{ item.dependency_factor_id }}">{{ item.dependency_factor_id }}</a> <code>{{ item.dependency_revision_id[:8] }}</code>{% if item.stale %}<span class="status blocked">可更新</span>{% endif %}</p>{% endfor %}{% endif %}
+{% if not (factor.locked_fields or factor.locked_operators or factor.locked_models or factor.dependencies) %}<p class="muted">无外部依赖。</p>{% endif %}
+</section></div>
+<section class="panel"><h2>历史版本</h2><div class="table-wrap"><table><thead><tr><th>Revision</th><th>公式</th><th>创建时间</th><th>摘要</th></tr></thead><tbody>{% for item in factor.revisions %}<tr><td>r{{ item.revision_number }}</td><td><code>{{ item.formula_source }}</code></td><td>{{ item.created_at | bjt }}</td><td><code>{{ item.definition_hash[:12] }}</code></td></tr>{% endfor %}</tbody></table></div></section>
+<section class="panel research-metrics" id="research-metrics"><h2>研究指标</h2>
+{% if metric_groups %}
+  {% for run in metric_groups %}
+  <details class="metric-run" {% if loop.first %}open{% endif %}>
+    <summary><span>运行 <code>{{ run.run_id[:8] }}</code></span><span class="metric-run-meta">{{ run.created_at[:10] }} · <a href="/runs/{{ run.run_id }}">查看任务</a></span></summary>
+    <div class="metric-run-body">
+      {% for index in run.indices %}
+      <section class="metric-index"><h3>{{ index.index_code }}</h3>
+        {% for variant in index.variants %}
+        {% set showcase_variant = showcase and variant.orientation == "original" %}
+        <details class="metric-variant" {% if showcase_variant or (not showcase and loop.first) %}open{% endif %}>
+          <summary>{{ variant.label }}</summary>
+          <div class="period-grid">
+            {% for period in variant.periods %}
+            <article class="metric-period-card period-{{ period.key }}">
+              <header><h4>{{ period.label }}</h4><span>{{ period.range }}</span></header>
+              <dl class="metric-grid">
+                {% for metric in period.metrics %}
+                <div class="metric-item"><dt>{{ metric.label }}</dt><dd class="{% if metric.negative %}negative{% endif %}">{{ metric.value }}</dd></div>
+                {% endfor %}
+              </dl>
+            </article>
+            {% endfor %}
+          </div>
+          {% if variant.layered_backtest %}
+          <section class="layered-backtest"{% if showcase_variant %} id="factor-showcase"{% endif %}>
+            <header class="layered-backtest-heading"><div><h4>五分组组合回测</h4><p>每月按因子值降序分为五组，组合1持有因子值最高的一组，基准为五组等权；下列收益均未扣交易成本。</p></div><span>Q1 高 → Q5 低</span></header>
+            {% if variant.layered_backtest.chart %}
+            <figure class="layered-chart"><div class="echarts-nav" data-series="{{ variant.layered_backtest.chart | tojson | forceescape }}" data-title="{{ variant.layered_backtest.chart.title }}"></div></figure>
+            {% endif %}
+            <div class="layered-periods">
+              {% for period in variant.layered_backtest.periods %}
+              <details class="layered-period" {% if period.key == "all" %}open{% endif %}>
+                <summary><span>{{ period.label }}绩效</span><small>{{ period.range }}</small></summary>
+                <div class="layered-table-wrap"><table class="layered-table"><thead><tr><th>投资组合</th>{% for column in variant.layered_backtest.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>
+                  {% for row in period.rows %}<tr class="portfolio-{{ row.portfolio }}"><th>{{ row.label }}</th>{% for value in row["values"] %}<td class="{% if value.negative %}negative{% endif %}">{{ value.text }}</td>{% endfor %}</tr>{% endfor %}
+                </tbody></table></div>
+              </details>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+        </details>
+        {% endfor %}
+      </section>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+{% else %}<p class="muted">尚无研究结果。可以从研究任务页发起评估。</p>{% endif %}
+</section>
+{% endblock %}

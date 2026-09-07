@@ -7,17 +7,17 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlquant import storage_io
-from mlquant.factor_cache import (
+from alphagym import storage_io
+from alphagym.factor_cache import (
     FactorValueCache,
     _covers,
     _merge_intervals,
     data_signature,
     universe_key,
 )
-from mlquant.factor_research_service import FactorResearchService
-from mlquant.factor_store import FactorStore
-from mlquant.factors.base import FactorDefinition
+from alphagym.factor_research_service import FactorResearchService
+from alphagym.factor_store import FactorStore
+from alphagym.factors.base import FactorDefinition
 
 
 def _definition(factor_id: str, formula: str) -> FactorDefinition:
@@ -233,7 +233,7 @@ def test_build_factor_cache_computes_missing_only(tmp_path) -> None:
     with FactorStore.from_root(tmp_path) as store:
         store.save_definition(_definition("AUTO", "=RETURN(market.adj_close, 5)"))
         store.save_definition(_definition("OTHER", "=RETURN(market.adj_close, 3)"))
-    from mlquant.factor_cache import build_factor_cache
+    from alphagym.factor_cache import build_factor_cache
 
     summary = build_factor_cache(tmp_path, ["AUTO", "OTHER"], workers=1)
     assert sorted(summary["computed"]) == ["AUTO", "OTHER"]
@@ -252,7 +252,7 @@ def test_build_factor_cache_computes_missing_only(tmp_path) -> None:
 
 
 def test_build_factor_cache_rejects_unknown_ids(tmp_path) -> None:
-    from mlquant.factor_cache import build_factor_cache
+    from alphagym.factor_cache import build_factor_cache
 
     with pytest.raises(ValueError, match="未知因子"):
         build_factor_cache(tmp_path, ["GHOST"], workers=1)

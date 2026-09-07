@@ -14,7 +14,7 @@ Web              ─┘                        ├─ FactorStore → ClickHouse
 共享报告校验与创建放在 `services.py`，本地进程管理放在 `jobs.py`。CLI 负责参数、
 退出码和 JSON；Web 负责表单及成品展示。高级算法保留独立函数，可以直接组合和测试。
 
-九条原脚本研究流程迁入 `mlquant.workflows`，每条通过显式 `Config` 和 `run()` 调用。
+九条原脚本研究流程迁入 `alphagym.workflows`，每条通过显式 `Config` 和 `run()` 调用。
 配置与数据根均由调用方提供，进度走 logger，结果返回状态及产物路径；原脚本保留薄包装。
 白名单 catalog 为 Agent 提供列表、参数描述与配置分发，拒绝任意模块导入执行。
 
@@ -31,7 +31,7 @@ sklearn。QMT 日线与复权因子分块暂存到 ClickHouse，单批提交清�
 
 ## 兼容变更
 
-- 旧模块导入和 `python -m mlquant.cli` 保留；新增 `python -m mlquant`。
+- 旧模块导入和 `python -m alphagym.cli` 保留；新增 `python -m alphagym`。
 - `report create --run` 改为后台启动，返回任务 ID；用 `report wait` 等待。
   需要同步时先 create，再 `report run --report-id ...`，或用 `Workspace.execute_report()`。
 - 数据契约错误退出码从 2 修正为 1；命令用法错误保持 2。

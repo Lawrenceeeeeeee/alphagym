@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mlquant.adapters import ParquetBundleAdapter, QmtDailyAdapter
-from mlquant.equity_data import SCHEMAS
+from alphagym.adapters import ParquetBundleAdapter, QmtDailyAdapter
+from alphagym.equity_data import SCHEMAS
 
 
 def test_parquet_adapter_normalizes_common_aliases(bundle, tmp_path) -> None:

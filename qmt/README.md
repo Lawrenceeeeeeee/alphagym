@@ -1,4 +1,4 @@
-# MLQuant QMT 模拟盘执行器
+# AlphaGYM QMT 模拟盘执行器
 
 `paper_trader.py` 是国金 QMT 策略编辑器使用的内置 Python（innerApi）脚本，不是
 MiniQMT 外部脚本。交易端不重新计算因子，只读取研究端冻结导出的：
@@ -15,7 +15,7 @@ MiniQMT 外部脚本。交易端不重新计算因子，只读取研究端冻结
 1. 在仓库环境重新导出冻结信号：
 
    ```powershell
-   python -m mlquant.cli signal export `
+   python -m alphagym.cli signal export `
      --root D:\QuantData\lake `
      --report-id YOUR_LOCAL_REPORT_ID `
      --method YOUR_LOCAL_METHOD --top-n 50 --json
@@ -35,5 +35,5 @@ MiniQMT 外部脚本。交易端不重新计算因子，只读取研究端冻结
    核对，不会自动重复报单。只有目标持仓全部一致后才生成 `executed.json`。
 
 旧版无 `schema_version=2`、`effective_trade_date` 或 `factor_manifest` 的信号会被拒绝，必须用
-当前 `mlquant signal export` 重新导出。错过信号生效日时只允许 dry-run。
+当前 `alphagym signal export` 重新导出。错过信号生效日时只允许 dry-run。
 报告、信号、账户配置及执行产物均留在本地，不提交 Git。

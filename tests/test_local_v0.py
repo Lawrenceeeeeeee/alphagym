@@ -3,8 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from mlquant.factors import REGISTRY
-from mlquant.local_v0 import (
+from alphagym.factors import REGISTRY
+from alphagym.local_v0 import (
     FUNDAMENTAL_FACTORS,
     PRICE_VOLUME_FACTORS,
     SHORT_HORIZON_FACTORS,

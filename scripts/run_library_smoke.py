@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from mlquant import FactorDefinition, Workspace, storage_io
-from mlquant.serialization import dumps
+from alphagym import FactorDefinition, Workspace, storage_io
+from alphagym.serialization import dumps
 
 
 def run(root: Path, *, background: bool = False) -> dict:
@@ -77,7 +77,7 @@ def main() -> None:
     parser.add_argument("--background", action="store_true")
     args = parser.parse_args()
     # Always use an isolated temporary root, never overwrite a user's market data.
-    root = Path(tempfile.mkdtemp(prefix="mlquant-library-smoke-"))
+    root = Path(tempfile.mkdtemp(prefix="alphagym-library-smoke-"))
     print(dumps(run(root, background=args.background)))
 
 

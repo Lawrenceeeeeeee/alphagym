@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlquant.portfolio_evaluation import (
+from alphagym.portfolio_evaluation import (
     CostScenario,
     _prepared_market_on,
     benchmark_returns,

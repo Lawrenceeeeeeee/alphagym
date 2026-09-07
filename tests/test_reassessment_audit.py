@@ -5,8 +5,8 @@ import json
 import pandas as pd
 import pytest
 
-from mlquant import storage_io
-from mlquant.reassessment_audit import audit_reassessment_data, require_reassessment_data
+from alphagym import storage_io
+from alphagym.reassessment_audit import audit_reassessment_data, require_reassessment_data
 
 
 def test_missing_data_fails_closed_and_writes_structured_audit(tmp_path) -> None:

@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from mlquant.reassessment_audit import audit_reassessment_data
+from alphagym.reassessment_audit import audit_reassessment_data
 
 
 def main() -> int:

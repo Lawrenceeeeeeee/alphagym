@@ -1,9 +1,9 @@
-# 从零开始使用 MLQuant
+# 从零开始使用 AlphaGYM — Quant Research Toolbox
 
-这份指南假设你没有安装过 MLQuant，也没有项目原作者的数据、私有配置或运行环境。
+这份指南假设你没有安装过 AlphaGYM，也没有项目原作者的数据、私有配置或运行环境。
 先完成第 1～3 步，即可用合成数据跑出第一份报告；有真实数据后再继续第 4～7 步。
 
-MLQuant 是研究工具：读取数据 → 计算因子 → 回测 → 离线生成报告。安装软件不会自动
+AlphaGYM 是可扩展的量化研究工具箱：读取数据 → 计算因子 → 回测 → 离线生成报告。安装软件不会自动
 获得行情、财务数据或数据源权限，也不会自动连接券商下单。
 
 ## 1. 准备 Python 和代码
@@ -34,12 +34,12 @@ python3.12 --version
 从项目提供方获取代码压缩包并解压，或在有仓库访问权限、已安装 Git 的情况下克隆：
 
 ```shell
-git clone "REPOSITORY_URL" mlquant
-cd mlquant
+git clone "REPOSITORY_URL" alphagym
+cd alphagym
 ```
 
 `REPOSITORY_URL` 必须替换成项目提供方给你的真实地址；本指南不假设项目已经公开。
-下载压缩包的用户直接在解压后的 `mlquant` 目录打开终端即可。
+下载压缩包的用户直接在解压后的 `alphagym` 目录打开终端即可。
 后面的安装命令和 `scripts/...` 命令都在这个目录执行，应能看到 `README.md`、
 `pyproject.toml`、`src/`。`pip install .` 中的点表示这个目录。
 
@@ -68,7 +68,7 @@ python -m pip install .
 ```powershell
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install .
-.\.venv\Scripts\python.exe -m mlquant --help
+.\.venv\Scripts\python.exe -m alphagym --help
 ```
 
 选择这种方式时，将本文后续命令开头的 `python` 换成 `.\.venv\Scripts\python.exe`。
@@ -78,13 +78,13 @@ python -m pip install .
 
 ```shell
 python --version
-python -c "import mlquant; print(mlquant.__version__); print(mlquant.__file__)"
-python -m mlquant --help
-python -m mlquant factor list --json
+python -c "import alphagym; print(alphagym.__version__); print(alphagym.__file__)"
+python -m alphagym --help
+python -m alphagym factor list --json
 ```
 
-预期：Python 为 3.12，能够打印 MLQuant 版本和导入路径，最后一条命令输出内置因子列表。
-这一步不需要数据目录。`python -m mlquant` 与 `mlquant` 等价，本文优先用前者，避免
+预期：Python 为 3.12，能够打印 AlphaGYM 版本和导入路径，最后一条命令输出内置因子列表。
+这一步不需要数据目录。`python -m alphagym` 与 `alphagym` 等价，本文优先用前者，避免
 命令不在 PATH 或误用其他 Python 环境。
 
 ### 按需安装功能
@@ -126,7 +126,7 @@ python scripts/run_library_smoke.py --background
 再打开导出目录中的 `report.html`：
 
 ```shell
-python -m mlquant report export --root <输出path中factor_library之前的根目录> --report-id <输出ID> --output <本地导出目录> --json
+python -m alphagym report export --root <输出path中factor_library之前的根目录> --report-id <输出ID> --output <本地导出目录> --json
 ```
 
 
@@ -135,30 +135,30 @@ python -m mlquant report export --root <输出path中factor_library之前的根�
 
 ## 4. 为自己的研究创建数据根
 
-代码目录和数据根是两个不同的目录。例如代码在 `~/Projects/mlquant`，数据在
-`~/mlquant-data`。不要把大型行情、数据库或研究报告放进 Git 仓库。
+代码目录和数据根是两个不同的目录。例如代码在 `~/Projects/alphagym`，数据在
+`~/alphagym-data`。不要把大型行情、数据库或研究报告放进 Git 仓库。
 
 Windows / PowerShell：
 
 ```powershell
-$env:MLQUANT_DATA_ROOT = Join-Path $env:USERPROFILE "mlquant-data"
-New-Item -ItemType Directory -Force -Path $env:MLQUANT_DATA_ROOT | Out-Null
+$env:ALPHAGYM_DATA_ROOT = Join-Path $env:USERPROFILE "alphagym-data"
+New-Item -ItemType Directory -Force -Path $env:ALPHAGYM_DATA_ROOT | Out-Null
 ```
 
 Mac / Linux：
 
 ```bash
-export MLQUANT_DATA_ROOT="$HOME/mlquant-data"
-mkdir -p "$MLQUANT_DATA_ROOT"
+export ALPHAGYM_DATA_ROOT="$HOME/alphagym-data"
+mkdir -p "$ALPHAGYM_DATA_ROOT"
 ```
 
 然后两种系统都运行：
 
 ```shell
-python -m mlquant status --json
-python -m mlquant storage init --json
-python -m mlquant factor sync --json
-python -m mlquant factor show MOMENTUM_60D --json
+python -m alphagym status --json
+python -m alphagym storage init --json
+python -m alphagym factor sync --json
+python -m alphagym factor show MOMENTUM_60D --json
 ```
 
 `status` 只检查现有内容，空目录是正常的；`factor sync` 才创建因子目录数据库并登记
@@ -171,12 +171,12 @@ python -m mlquant factor show MOMENTUM_60D --json
 
 ## 5. 准备真实数据：三种入口任选其一
 
-### A. 已有 MLQuant 数据
+### A. 已有 AlphaGYM 数据
 
 使用显式迁移命令，保留源文件：
 
 ```shell
-python -m mlquant storage migrate --source <旧数据根> --root <已配置的新工作区> --json
+python -m alphagym storage migrate --source <旧数据根> --root <已配置的新工作区> --json
 ```
 
 详见 [迁移与备份](clickhouse.md)，不要直接复制文件后期待自动读取。
@@ -187,13 +187,13 @@ QMT 来源目录应包含 `SH/86400/`、`SZ/86400/` 等日线目录，以及独�
 把下列路径替换为你的实际目录。Windows 示例：
 
 ```powershell
-python -m mlquant equity-data import-qmt --datadir "D:\QMT\datadir" --no-refresh-factor-cache --json
+python -m alphagym equity-data import-qmt --datadir "D:\QMT\datadir" --no-refresh-factor-cache --json
 ```
 
 Mac 上若已复制原始文件，可用同一个解析器：
 
 ```bash
-python -m mlquant equity-data import-qmt --datadir "$HOME/qmt-datadir" --no-refresh-factor-cache --json
+python -m alphagym equity-data import-qmt --datadir "$HOME/qmt-datadir" --no-refresh-factor-cache --json
 ```
 
 这里使用第 4 步配置的数据根，首次导入显式关闭后台缓存重建，避免顺带启动全因子缓存。
@@ -231,7 +231,7 @@ python -m mlquant equity-data import-qmt --datadir "$HOME/qmt-datadir" --no-refr
 
 ```shell
 python -m pip install ".[data]"
-python -m mlquant equity-data sync-tushare --help
+python -m alphagym equity-data sync-tushare --help
 ```
 
 先在当前 shell 设置自己的 `TUSHARE_TOKEN`，不要写入仓库。量价部分的调用示例：
@@ -240,14 +240,14 @@ Windows：
 
 ```powershell
 $env:TUSHARE_TOKEN = "替换为你自己的Token"
-python -m mlquant equity-data sync-tushare --root "$env:MLQUANT_DATA_ROOT" --start 2012-01-01 --end 2025-12-31 --dataset market
+python -m alphagym equity-data sync-tushare --root "$env:ALPHAGYM_DATA_ROOT" --start 2012-01-01 --end 2025-12-31 --dataset market
 ```
 
 Mac / Linux：
 
 ```bash
 export TUSHARE_TOKEN="替换为你自己的Token"
-python -m mlquant equity-data sync-tushare --root "$MLQUANT_DATA_ROOT" --start 2012-01-01 --end 2025-12-31 --dataset market
+python -m alphagym equity-data sync-tushare --root "$ALPHAGYM_DATA_ROOT" --start 2012-01-01 --end 2025-12-31 --dataset market
 ```
 
 数据接口需要自己的权限与配额。市场数据支持检查点续传与重复更新；财务保留公告可得日。
@@ -256,7 +256,7 @@ python -m mlquant equity-data sync-tushare --root "$MLQUANT_DATA_ROOT" --start 2
 
 ### 怎么判断数据够不够？
 
-先运行 `python -m mlquant status --json` 看文件和字段是否存在。它不是研究资格认证。
+先运行 `python -m alphagym status --json` 看文件和字段是否存在。它不是研究资格认证。
 
 - ALL_A 原始值五分组的量价因子：至少需要日线和复权因子；具体因子还可能要求扩展行情字段。
 - 财务因子：增加财务字段及真实可得日。
@@ -266,7 +266,7 @@ python -m mlquant equity-data sync-tushare --root "$MLQUANT_DATA_ROOT" --start 2
 完整数据契约和正式行业研究的审计入口：
 
 ```shell
-python -m mlquant equity-data audit --index 000300.SH --json
+python -m alphagym equity-data audit --index 000300.SH --json
 ```
 
 它会检查八张表；只导入量价数据时可能报缺表。不要把它与原始值量价回测的按需校验
@@ -289,7 +289,7 @@ python -m mlquant equity-data audit --index 000300.SH --json
 然后把 `--spec` 改为该文件路径。
 
 ```shell
-python -m mlquant report create --spec config/report.example.yaml --ensure-runs --run --json
+python -m alphagym report create --spec config/report.example.yaml --ensure-runs --run --json
 ```
 
 `--ensure-runs` 会先同步补跑报告所缺的因子回测，数据量大时这一步可能较久；
@@ -297,15 +297,15 @@ python -m mlquant report create --spec config/report.example.yaml --ensure-runs 
 如果希望先手动验证单因子，可在创建报告前运行：
 
 ```shell
-python -m mlquant factor run --factor MOMENTUM_60D --index ALL_A --start-date 2014-01-01 --end-date 2025-12-31 --mode smoke --json
+python -m alphagym factor run --factor MOMENTUM_60D --index ALL_A --start-date 2014-01-01 --end-date 2025-12-31 --mode smoke --json
 ```
 
 复制创建报告输出中的 `report_id`，把下列命令中的占位文字替换成真实 ID：
 
 ```shell
-python -m mlquant report status --report-id "替换为返回的report_id" --json
-python -m mlquant report wait --report-id "替换为返回的report_id" --timeout 3600 --json
-python -m mlquant report show --report-id "替换为返回的report_id" --json
+python -m alphagym report status --report-id "替换为返回的report_id" --json
+python -m alphagym report wait --report-id "替换为返回的report_id" --timeout 3600 --json
+python -m alphagym report show --report-id "替换为返回的report_id" --json
 ```
 
 `wait` 成功应返回 `status: succeeded`；失败时读 `error`，必要时查看数据根下
@@ -328,14 +328,14 @@ python -m mlquant report show --report-id "替换为返回的report_id" --json
 报告是离线成品，浏览不会重新计算。查询已有报告用：
 
 ```shell
-python -m mlquant report list --json
+python -m alphagym report list --json
 ```
 
 如果希望使用本地网页界面，在代码目录安装 Web 额外依赖后启动：
 
 ```shell
 python -m pip install ".[web]"
-python -m mlquant factor serve --port 8765
+python -m alphagym factor serve --port 8765
 ```
 
 浏览器访问 `http://127.0.0.1:8765`，报告列表在 `/reports`，新建表单在 `/reports/new`。
@@ -349,9 +349,9 @@ python -m mlquant factor serve --port 8765
 
 ```python
 from pathlib import Path
-from mlquant import Workspace
+from alphagym import Workspace
 
-workspace = Workspace()  # 从 MLQUANT_DATA_ROOT 读取
+workspace = Workspace()  # 从 ALPHAGYM_DATA_ROOT 读取
 workspace.initialize()
 print(workspace.status())
 task = workspace.create_report(Path("config/report.example.yaml"), ensure_runs=True)
@@ -373,25 +373,25 @@ Agent 的建议顺序是：status → factor list/show → 写 spec → report c
 其他研究流程可先发现再调用：
 
 ```shell
-python -m mlquant workflow list --json
-python -m mlquant workflow describe ml-exploration --json
+python -m alphagym workflow list --json
+python -m alphagym workflow describe ml-exploration --json
 ```
 
 根据返回的必填字段、类型和默认值编写自己的 YAML 配置，再使用
-`python -m mlquant workflow run ml-exploration --config "自己的配置文件.yaml" --json`。
+`python -m alphagym workflow run ml-exploration --config "自己的配置文件.yaml" --json`。
 不要直接运行占位配置；不同流程的数据、模型依赖不同，详见 [研究工作流](workflows.md)。
 
 ## 9. 下次使用、更新和常见问题
 
-下次使用只需：进入代码目录 → 激活 `.venv` → 设置 `MLQUANT_DATA_ROOT` → 查询/运行。
+下次使用只需：进入代码目录 → 激活 `.venv` → 设置 `ALPHAGYM_DATA_ROOT` → 查询/运行。
 无需重复下载全部行情。更新代码后重新运行对应的 `python -m pip install ...`；升级已有
 数据根前先备份，再执行 `factor sync`。不要在旧版本后台任务仍运行时覆盖安装。
 
 |现象|检查方法|
 |---|---|
 |找不到 Python / 版本不符|回到第 1 步，明确使用 Python 3.12|
-|`No module named mlquant`|确认激活了安装时的环境；用 `python -m pip show mlquant` 查看|
-|找不到 `mlquant` 命令|改用 `python -m mlquant`，检查环境是否激活|
+|`No module named alphagym`|确认激活了安装时的环境；用 `python -m pip show alphagym` 查看|
+|找不到 `alphagym` 命令|改用 `python -m alphagym`，检查环境是否激活|
 |提示缺少数据根|当前终端重新设置环境变量，或显式传 `--root`|
 |Catalog missing / 找不到因子|对同一数据根执行 `factor sync`；检查是否写错根路径|
 |缺少 sklearn / XGBoost 等|回第 2 步安装对应额外依赖；Mac 上先确认基础 smoke 通过，再排查该依赖|

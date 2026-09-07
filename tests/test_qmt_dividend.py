@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mlquant.qmt_dividend import _ex_date, build_adjustments, parse_dividend_key
+from alphagym.qmt_dividend import _ex_date, build_adjustments, parse_dividend_key
 
 
 def test_parse_dividend_key() -> None:

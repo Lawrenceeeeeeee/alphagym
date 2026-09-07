@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mlquant.signal_export import _next_month_signal_date, _next_open_date
+from alphagym.signal_export import _next_month_signal_date, _next_open_date
 
 
 def test_next_open_date_is_strictly_after_signal() -> None:

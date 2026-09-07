@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlquant import storage_io
-from mlquant.equity_data import (
+from alphagym import storage_io
+from alphagym.equity_data import (
     _QMT_DAILY_DTYPE,
     DataContractError,
     EquityDataBundle,

@@ -5,7 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from mlquant.qmt_dividend import read_dividend_events
+from alphagym.qmt_dividend import read_dividend_events
 
 
 def main() -> int:

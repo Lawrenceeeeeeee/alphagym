@@ -6,8 +6,8 @@ import json
 import pandas as pd
 import pytest
 
-from mlquant.storage import ClickHouseStore
-from mlquant.tushare_import import TushareImporter
+from alphagym.storage import ClickHouseStore
+from alphagym.tushare_import import TushareImporter
 
 
 def test_versions_upsert_and_aborted_batch(tmp_path):
@@ -105,7 +105,7 @@ def test_schema_evolution_preserves_older_rows(tmp_path):
 
 
 def test_late_publication_cannot_enter_an_existing_snapshot(tmp_path):
-    from mlquant.storage import WriteBatch
+    from alphagym.storage import WriteBatch
 
     store = ClickHouseStore(tmp_path, initialize=True)
     pending = WriteBatch(store)
@@ -117,7 +117,7 @@ def test_late_publication_cannot_enter_an_existing_snapshot(tmp_path):
 
 
 def test_parquet_workspace_migration_is_resumable_and_preserves_source(tmp_path):
-    from mlquant.migration import migrate_workspace
+    from alphagym.migration import migrate_workspace
 
     source, target = tmp_path / "old", tmp_path / "new"
     (source / "equity").mkdir(parents=True)
@@ -137,7 +137,7 @@ def test_parquet_workspace_migration_is_resumable_and_preserves_source(tmp_path)
 
 
 def test_workspace_migration_normalizes_legacy_tushare_units(tmp_path):
-    from mlquant.migration import migrate_workspace
+    from alphagym.migration import migrate_workspace
 
     source, target = tmp_path / "old", tmp_path / "new"
     (source / "equity").mkdir(parents=True)
@@ -162,7 +162,7 @@ def test_zero_column_parquet_is_preserved_as_an_empty_frame(tmp_path):
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    from mlquant.migration import migrate_workspace
+    from alphagym.migration import migrate_workspace
 
     source, target = tmp_path / "old", tmp_path / "new"
     path = source / "experiments" / "rejected.parquet"
@@ -202,7 +202,7 @@ def test_financial_pagination_uses_provider_limit(tmp_path):
 def test_streaming_counts_and_pinned_market_version(tmp_path):
     import pyarrow as pa
 
-    from mlquant import storage_io
+    from alphagym import storage_io
 
     store = storage_io.store_for(tmp_path, initialize=True)
     store.write_frame("equity/custom", pd.DataFrame({"value": [1., 2.]}))
@@ -223,10 +223,10 @@ def test_streaming_counts_and_pinned_market_version(tmp_path):
 def test_catalog_migration_and_workspace_relocation(tmp_path):
     import sqlite3
 
-    from mlquant import storage_io
-    from mlquant.factor_store import FactorStore
-    from mlquant.factors.library import seed_definitions
-    from mlquant.migration import migrate_workspace
+    from alphagym import storage_io
+    from alphagym.factor_store import FactorStore
+    from alphagym.factors.library import seed_definitions
+    from alphagym.migration import migrate_workspace
 
     source, target, moved = (tmp_path / name for name in ("old", "new", "moved"))
     (source / "factor_library").mkdir(parents=True)

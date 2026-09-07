@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    MLQUANT_DATA_ROOT=/data/lake
+    ALPHAGYM_DATA_ROOT=/data/lake
 
 WORKDIR /app
 COPY pyproject.toml README.md ./
@@ -11,9 +11,9 @@ COPY src ./src
 COPY scripts ./scripts
 COPY config ./config
 RUN python -m pip install --no-cache-dir --no-deps . \
-    && useradd --create-home --uid 10001 mlquant \
+    && useradd --create-home --uid 10001 alphagym \
     && mkdir -p /data/lake \
-    && chown -R mlquant:mlquant /app /data/lake
+    && chown -R alphagym:alphagym /app /data/lake
 
-USER mlquant
-CMD ["mlquant", "--help"]
+USER alphagym
+CMD ["alphagym", "--help"]

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mlquant.audit import assert_selection_isolation, assign_period
-from mlquant.pipeline import month_end_signal_dates, run_long_only_backtest
+from alphagym.audit import assert_selection_isolation, assign_period
+from alphagym.pipeline import month_end_signal_dates, run_long_only_backtest
 
 
 def test_period_partition_excludes_2026() -> None:

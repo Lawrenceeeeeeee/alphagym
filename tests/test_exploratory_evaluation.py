@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mlquant.exploratory_evaluation import fractional_simulation
+from alphagym.exploratory_evaluation import fractional_simulation
 
 
 def test_fractional_flat_market_costs_reduce_wealth() -> None:

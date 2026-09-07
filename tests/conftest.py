@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from mlquant.equity_data import EquityDataBundle
+from alphagym.equity_data import EquityDataBundle
 
 
 @pytest.fixture
