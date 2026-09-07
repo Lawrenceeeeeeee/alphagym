@@ -1,10 +1,58 @@
 # MLQuant
 
-因子研究库。通过 Python API、Agent JSON CLI
-和可选的本地 Web 提供公式化因子注册、点时数据校验、离线报告及月／周／日频研究。
+[![CI](https://github.com/Lawrenceeeeeeee/mlquant/actions/workflows/ci.yml/badge.svg)](https://github.com/Lawrenceeeeeeee/mlquant/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![ClickHouse](https://img.shields.io/badge/ClickHouse-25.8-FFCC01?logo=clickhouse&logoColor=black)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-本仓库只包含代码、配置和使用说明。**研究结论、收益数字、模型排名、原始数据、
-模型产物与交易信号均不发布。** 见 [发布边界](docs/privacy.md)。
+面向 A 股点时研究的因子工程平台。MLQuant 将数据接入、因子定义、五分组回测、
+开发／验证／测试隔离和离线报告组织成可复现的 Python、CLI 与 Web 工作流。
+
+![MLQuant 因子看板：AMIHUD_5D 五分组累计净值](docs/assets/factor-dashboard.png)
+
+> 上图由真实 A 股历史数据生成，用于展示研究系统的因子分层与报告能力；区间为
+> 2014–2025，曲线未扣交易成本，不构成投资建议或未来收益承诺。仓库不包含原始行情、
+> 个股信号、持仓或账户信息。
+
+## 项目解决什么问题
+
+传统因子脚本容易把数据读取、公式、回测和报告混在一起，也很难证明历史结果没有使用
+未来信息。MLQuant 把研究过程拆成带版本的数据与计算契约：信号在月末收盘后形成，下一
+交易日开盘成交；财务字段按可得日使用；模型选择只发生在开发与验证期，测试期只评估。
+
+## 我的实现范围
+
+- 设计并实现因子注册表、受限公式 DSL、依赖锁定、稳定版本与缓存复用。
+- 将行情、基本面、缓存、运行目录和报告统一迁移到 ClickHouse，支持增量 Tushare、QMT
+  和 Parquet/CSV 导入，以及可恢复迁移和 NAS 备份。
+- 实现五分组回测、IC/ICIR、交易成本、阶段隔离、组合比较和静态报告流水线。
+- 提供 Python API、稳定 JSON CLI、本地 Web 看板、Docker 环境与合成数据 CI。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    A[Tushare / QMT / Parquet] --> B[增量接入与字段标准化]
+    B --> C[点时审计<br/>交易日·财务可得日·历史成分]
+    C --> D[(ClickHouse<br/>版本化逻辑资源)]
+    D --> E[FactorRegistry<br/>公式 DSL 与依赖锁定]
+    E --> F[研究引擎<br/>五分组·IC·组合·成本]
+    F --> G[开发 / 验证 / 测试隔离]
+    G --> H[离线报告与因子看板]
+    H --> I[Python API]
+    H --> J[JSON CLI / Agent]
+    H --> K[Local Web]
+```
+
+## 技术难点
+
+- **点时一致性：** 后复权因子独立保存，财务使用公告可得日，未来数据不能改写历史信号。
+- **统一持久化：** 大规模表格和小型报告资源共享 ClickHouse 的原子发布、版本读取与迁移检查点。
+- **研究隔离：** 因子方向、去相关筛选和组合权重在验证期末冻结，测试期和 2026 监控期不参与调参。
+- **可复现入口：** Web 和 CLI 只读取离线成品；相同定义使用稳定 hypothesis_id 和数据版本。
+
+本仓库包含代码、配置、使用说明和一张汇总研究截图。**原始数据、完整研究报告、模型产物
+与交易信号均不发布。** 见 [发布边界](docs/privacy.md)。
 
 ## 使用方法
 

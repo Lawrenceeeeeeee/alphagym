@@ -6,12 +6,12 @@
   <title>{% block title %}MLQuant 因子库{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/factor-library.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='/catalog-filters.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/factor-detail.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/factor-detail.css') }}?v=2">
   <script src="{{ url_for('static', path='/echarts.min.js') }}" defer></script>
   <script src="{{ url_for('static', path='/charts.js') }}" defer></script>
   <script src="{{ url_for('static', path='/sortable-tables.js') }}" defer></script>
 </head>
-<body>
+<body class="{% if showcase | default(false) %}showcase-mode{% endif %}">
   <header class="topbar">
     <a class="brand" href="/"><span>MLQ</span> 因子库</a>
     <nav>

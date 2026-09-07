@@ -23,7 +23,8 @@
       {% for index in run.indices %}
       <section class="metric-index"><h3>{{ index.index_code }}</h3>
         {% for variant in index.variants %}
-        <details class="metric-variant" {% if loop.first %}open{% endif %}>
+        {% set showcase_variant = showcase and variant.orientation == "original" %}
+        <details class="metric-variant" {% if showcase_variant or (not showcase and loop.first) %}open{% endif %}>
           <summary>{{ variant.label }}</summary>
           <div class="period-grid">
             {% for period in variant.periods %}
@@ -38,7 +39,7 @@
             {% endfor %}
           </div>
           {% if variant.layered_backtest %}
-          <section class="layered-backtest">
+          <section class="layered-backtest"{% if showcase_variant %} id="factor-showcase"{% endif %}>
             <header class="layered-backtest-heading"><div><h4>五分组组合回测</h4><p>每月按因子值降序分为五组，组合1持有因子值最高的一组，基准为五组等权；下列收益均未扣交易成本。</p></div><span>Q1 高 → Q5 低</span></header>
             {% if variant.layered_backtest.chart %}
             <figure class="layered-chart"><div class="echarts-nav" data-series="{{ variant.layered_backtest.chart | tojson | forceescape }}" data-title="{{ variant.layered_backtest.chart.title }}"></div></figure>

@@ -540,12 +540,23 @@ def create_app(data_root: str | Path) -> FastAPI:
         ]
         factor["locked_models"] = json.loads(revision["models_json"])
         metric_groups = _group_factor_metrics(factor["metrics"])
+        showcase = request.query_params.get("showcase") == "1"
+        if showcase:
+            metric_groups = metric_groups[:1]
+            for index in metric_groups[0]["indices"] if metric_groups else []:
+                original = [
+                    variant
+                    for variant in index["variants"]
+                    if variant["orientation"] == "original"
+                ]
+                index["variants"] = original or index["variants"][:1]
         _attach_layered_backtests(metric_groups, research_artifacts, factor_id)
         return render(
             request,
             "factor_detail.html",
             factor=factor,
             metric_groups=metric_groups,
+            showcase=showcase,
         )
 
     @app.get("/artifacts/{artifact_id}/view")

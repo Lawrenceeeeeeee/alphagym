@@ -29,7 +29,9 @@ def test_versions_upsert_and_aborted_batch(tmp_path):
 
 def test_index_nulls_and_projection_filters(tmp_path):
     store = ClickHouseStore(tmp_path, initialize=True)
-    frame = pd.DataFrame({"value": [1., float("nan")], "date": pd.to_datetime(["2024-01-01", "2024-01-02"])},
+    frame = pd.DataFrame({"value": [1., float("nan")], "date": pd.to_datetime(
+        ["2024-01-01", "2024-01-02"]
+    ).astype("datetime64[ns]")},
                          index=pd.Index(["a", "b"], name="factor"))
     store.write_frame("matrix", frame, index=True)
     pd.testing.assert_frame_equal(store.read_frame("matrix"), frame)

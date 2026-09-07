@@ -7,6 +7,7 @@ name = "mlquant"
 version = "0.2.0"
 description = "Point-in-time A-share factor research in the Huatai style"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "clickhouse-connect>=0.10,<1",
@@ -30,6 +31,11 @@ dev = ["mlquant[web,boosting,pdf]", "httpx>=0.27,<1", "build>=1.2,<2", "pytest>=
 
 [project.scripts]
 mlquant = "mlquant.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Lawrenceeeeeeee/mlquant"
+Repository = "https://github.com/Lawrenceeeeeeee/mlquant"
+Documentation = "https://github.com/Lawrenceeeeeeee/mlquant/tree/master/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlquant"]

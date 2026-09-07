@@ -137,6 +137,45 @@
   background: #fffefb;
 }
 
+#factor-showcase {
+  scroll-margin-top: 18px;
+}
+
+.showcase-mode main {
+  padding-top: 20px;
+}
+
+.showcase-mode .hero.compact {
+  padding: 8px 0 18px;
+}
+
+.showcase-mode .hero.compact .actions,
+.showcase-mode .formula-card,
+.showcase-mode main > .grid,
+.showcase-mode main > .panel:not(#research-metrics),
+.showcase-mode #research-metrics > h2,
+.showcase-mode .metric-run > summary,
+.showcase-mode .metric-index > h3,
+.showcase-mode .metric-variant > summary,
+.showcase-mode .period-grid {
+  display: none;
+}
+
+.showcase-mode #research-metrics {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.showcase-mode .metric-run-body {
+  padding: 0;
+}
+
+.showcase-mode .layered-backtest {
+  margin: 0;
+}
+
 .layered-backtest-heading {
   display: flex;
   align-items: flex-start;
@@ -169,6 +208,11 @@
 .layered-chart {
   margin: 0;
   padding: 14px 16px 8px;
+}
+
+.echarts-nav {
+  width: 100%;
+  height: 420px;
 }
 
 .layered-chart img {
@@ -280,5 +324,9 @@
   .layered-chart {
     padding-right: 6px;
     padding-left: 6px;
+  }
+
+  .echarts-nav {
+    height: 320px;
   }
 }
