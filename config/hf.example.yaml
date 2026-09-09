@@ -1,0 +1,16 @@
+mode: exploratory
+exchange: OKX
+instrument: BTC-USDT
+sample_ms: 1000
+workers: 8
+splits:
+  development: ['2026-08-29', '2026-08-31']
+  validation: ['2026-09-01', '2026-09-02']
+  test: ['2026-09-03', '2026-09-04']
+horizons_seconds: [1, 5, 30, 60]
+latency_seconds: 1
+quantity_btc: 0.0001
+fees_bps_per_side: [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5]
+selection_fee_bps_per_side: 6.0
+signal_upper_quantiles: [0.6, 0.7, 0.8, 0.9, 0.95]
+min_policy_trades: 100

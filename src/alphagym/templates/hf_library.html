@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}高频探索 · AlphaGYM{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">HIGH FREQUENCY RESEARCH</p>
+<h1>高频因子库</h1><p>订单簿信号与短期价格研究。当前覆盖 OKX BTC-USDT 现货，
+所有结果均为离线探索实验，报告打开即读。</p></div></section>
+<section class="panel"><h2>研究报告</h2>
+<p>价格预测能力与成本后收益分开评估；开发、验证与测试分栏展示。</p>
+<table><thead><tr><th>报告</th><th>类型/区间（UTC）</th><th>盘口样本</th><th>选择结果</th></tr></thead>
+<tbody>{% for report in reports %}<tr>
+<td><a href="/hf/reports/{{ report.report_id }}">{{ report.report_id }}</a></td>
+{% if report.report_type == 'hf_ml' %}
+<td>机器学习组合 · 来源 {{ report.source_report_id }}</td>
+<td>{{ report.samples }}</td><td>{{ report.selection.chosen | length }} 个持有期</td>
+{% else %}
+<td>{{ report.spec.dates[0] }} — {{ report.spec.dates[-1] }}</td>
+<td>{{ report.samples }}</td><td>{{ report.selection.passing_candidates | length }} 个通过成本门槛</td>
+{% endif %}
+</tr>{% else %}<tr><td colspan="4">暂无预计算报告。</td></tr>{% endfor %}</tbody></table></section>
+<section class="panel"><h2>因子定义 · {{ factors | length }} 个</h2>
+<p>同一研究假设的不同参数归入同一组，回看时间以秒为单位。缺失值保留为空。</p>
+<table><thead><tr><th>因子</th><th>研究假设</th><th>回看秒数</th><th>定义</th></tr></thead>
+<tbody>{% for factor in factors %}<tr><td>{{ factor.name }}</td>
+<td>{{ factor.hypothesis_id }}</td><td>{{ factor.lookback_seconds }}</td>
+<td>{{ factor.formula }}</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

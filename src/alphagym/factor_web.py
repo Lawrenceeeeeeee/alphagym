@@ -3,9 +3,11 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -455,6 +457,7 @@ def _comparison_table(
 
 def create_app(data_root: str | Path) -> FastAPI:
     root = Path(data_root).expanduser().resolve()
+    crypto_root = Path(os.environ.get('ALPHAGYM_CRYPTO_DATA_ROOT', root)).expanduser().resolve()
     package = Path(__file__).parent
     templates = Jinja2Templates(directory=str(package / "templates"))
     # Keep templates and their Python context on the same deployed version. Without this,
@@ -727,6 +730,171 @@ def create_app(data_root: str | Path) -> FastAPI:
             return len(resolve_factors(store, spec.factors, index_code=spec.universe.index_code))
         except (ValueError, TypeError, KeyError):
             return None
+
+    @app.get('/hf', response_class=HTMLResponse)
+    def hf_library(request: Request) -> HTMLResponse:
+        from alphagym.hf_factors import factor_catalog
+
+        database = storage_io.store_for(root)
+        items = []
+        for resource in database.list('factor_library/reports/'):
+            if (resource['path'].endswith('/manifest.json')
+                    and resource['path'].split('/')[-2].startswith(('hf-', 'hfml-'))):
+                items.append(json.loads(database.read_blob(resource['path'])))
+        return render(request, 'hf_library.html', factors=factor_catalog(), reports=items)
+
+    @app.get('/hf/reports/{report_id}', response_class=HTMLResponse)
+    def hf_report(report_id: str) -> HTMLResponse:
+        import re
+
+        if not re.fullmatch(r'hf(?:ml)?-[a-f0-9]{16}', report_id):
+            raise HTTPException(404, 'Report not found')
+        path = root/'factor_library'/'reports'/report_id/'report.html'
+        if not storage_io.exists(path):
+            raise HTTPException(404, 'Report not found')
+        return HTMLResponse(storage_io.read_text(path))
+
+    def live_frame(session_id: str, name: str, limit: int = 100) -> list[dict[str, Any]]:
+        database = storage_io.store_for(root)
+        try:
+            frame = database.read_frame(
+                f'factor_library/hf_live/{session_id}/{name}.parquet')
+        except (FileNotFoundError, KeyError):
+            return []
+        return json.loads(frame.tail(limit).to_json(orient='records'))
+
+    @app.get('/hf/live/{session_id}', response_class=HTMLResponse)
+    def hf_live_dashboard(request: Request, session_id: str) -> HTMLResponse:
+        if not session_id.startswith('hfpaper-'):
+            raise HTTPException(404, 'Live session not found')
+        return render(request, 'hf_live.html', session_id=session_id)
+
+    @app.get('/api/hf/live/{session_id}')
+    def hf_live_data(session_id: str) -> dict[str, Any]:
+        if not session_id.startswith('hfpaper-'):
+            raise HTTPException(404, 'Live session not found')
+        database = storage_io.store_for(root)
+        try:
+            status = json.loads(database.read_blob(
+                f'factor_library/hf_live/{session_id}/status.json'))
+        except (FileNotFoundError, KeyError, json.JSONDecodeError) as error:
+            raise HTTPException(404, 'Live session not found') from error
+        updated = datetime.fromisoformat(status['updated_at'])
+        stale_seconds = max(0, (datetime.now(UTC)-updated).total_seconds())
+        stalled = status.get('status') in {'running', 'queued'} and stale_seconds > 90
+        events = live_frame(session_id, 'events', 40)
+        signals = live_frame(session_id, 'signals', 120)
+        trades = live_frame(session_id, 'trades', 80)
+        from alphagym.hf_live import pair_round_trips
+
+        round_trips = pair_round_trips(
+            trades, Decimal(str(status.get('contract_value') or '.01')))
+        samples = 0
+        for event in reversed(events):
+            if event.get('kind') == 'heartbeat':
+                try:
+                    samples = int(json.loads(event.get('details') or '{}').get('samples', 0))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+                break
+        return {
+            'status': status, 'effective_status': 'stalled' if stalled else status['status'],
+            'stalled': stalled, 'stale_seconds': round(stale_seconds), 'samples': samples,
+            'events': events, 'signals': signals, 'trades': trades,
+            'round_trips': round_trips,
+            'pnl': {
+                'net_usdt': sum(row['net_pnl_usdt'] for row in round_trips),
+                'gross_usdt': sum(row['gross_pnl_usdt'] for row in round_trips),
+                'fees_usdt': sum(row['fees_usdt'] for row in round_trips),
+                'win_rate': (sum(row['net_pnl_usdt'] > 0 for row in round_trips)
+                             / len(round_trips) if round_trips else None),
+            },
+        }
+
+    def crypto_live_frame(session_id: str, name: str) -> list[dict[str, Any]]:
+        database = storage_io.store_for(crypto_root)
+        try:
+            frame = database.read_frame(
+                f'factor_library/crypto_live/{session_id}/{name}.parquet')
+        except (FileNotFoundError, KeyError):
+            return []
+        return json.loads(frame.to_json(orient='records', date_format='iso'))
+
+    @app.get('/crypto', response_class=HTMLResponse)
+    def crypto_hourly_library(request: Request) -> HTMLResponse:
+        database = storage_io.store_for(crypto_root)
+        reports, sessions = [], []
+        for resource in database.list('factor_library/reports/'):
+            if (resource['path'].endswith('/manifest.json')
+                    and resource['path'].split('/')[-2].startswith('crypto-')):
+                reports.append(json.loads(database.read_blob(resource['path'])))
+        for resource in database.list('factor_library/crypto_live/'):
+            if resource['path'].endswith('/status.json'):
+                sessions.append(json.loads(database.read_blob(resource['path'])))
+        reports.sort(key=lambda row: row.get('created_at', ''), reverse=True)
+        sessions.sort(key=lambda row: row.get('started_at', ''), reverse=True)
+        return render(request, 'crypto_hourly.html', reports=reports, sessions=sessions)
+
+    @app.get('/crypto/live/{session_id}', response_class=HTMLResponse)
+    def crypto_hourly_live(request: Request, session_id: str) -> HTMLResponse:
+        if not session_id.startswith('cryptopaper-'):
+            raise HTTPException(404, 'Crypto live session not found')
+        return render(request, 'crypto_hourly_live.html', session_id=session_id)
+
+    @app.get('/api/crypto/live/{session_id}')
+    def crypto_hourly_live_data(session_id: str) -> dict[str, Any]:
+        if not session_id.startswith('cryptopaper-'):
+            raise HTTPException(404, 'Crypto live session not found')
+        database = storage_io.store_for(crypto_root)
+        try:
+            status = json.loads(database.read_blob(
+                f'factor_library/crypto_live/{session_id}/status.json'))
+        except (FileNotFoundError, KeyError, json.JSONDecodeError) as error:
+            raise HTTPException(404, 'Crypto live session not found') from error
+        plan = crypto_live_frame(session_id, 'plan')
+        fills = crypto_live_frame(session_id, 'fills')
+        closes = crypto_live_frame(session_id, 'closes')
+        realized = crypto_live_frame(session_id, 'realized')
+        fill_map = {row['instrument']: row for row in fills}
+        instruments = set(fill_map)
+        positions, position_error = [], None
+        if status.get('status') == 'open':
+            try:
+                from alphagym.okx_api import OKXCredentials, OKXDemoClient
+
+                client = OKXDemoClient(OKXCredentials.from_env())
+                for row in client.positions():
+                    if row.get('instId') not in instruments:
+                        continue
+                    fill = fill_map[row['instId']]
+                    positions.append({
+                        'instrument': row['instId'], 'direction': fill['direction'],
+                        'contracts': float(row.get('pos') or 0),
+                        'entry_price': float(row.get('avgPx') or fill.get('average_price') or 0),
+                        'mark_price': float(row.get('markPx') or 0),
+                        'upl_usdt': float(row.get('upl') or 0),
+                        'leverage': float(row.get('lever') or 0),
+                    })
+            except (OSError, ValueError, KeyError) as error:
+                position_error = type(error).__name__
+        entry_fees = -sum(float(row.get('fee') or 0) for row in fills
+                          if row.get('fee_currency') == 'USDT')
+        unrealized = sum(row['upl_usdt'] for row in positions)
+        realized_net = sum(float(row.get('net_pnl_before_funding_usdt') or 0)
+                           for row in realized)
+        now = datetime.now(UTC)
+        close_due = datetime.fromisoformat(status['close_due_at'])
+        return {
+            'status': status, 'plan': plan, 'fills': fills, 'closes': closes,
+            'realized': realized, 'positions': positions,
+            'position_error': position_error, 'server_time': now.isoformat(),
+            'seconds_remaining': max(0, round((close_due-now).total_seconds())),
+            'pnl': {
+                'unrealized_usdt': unrealized, 'entry_fees_usdt': entry_fees,
+                'current_before_funding_usdt': unrealized-entry_fees,
+                'realized_before_funding_usdt': realized_net,
+            },
+        }
 
     @app.get("/reports", response_class=HTMLResponse)
     def reports(request: Request) -> HTMLResponse:

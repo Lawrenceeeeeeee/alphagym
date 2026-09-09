@@ -1,0 +1,43 @@
+# OKX USDT 线性永续合约的周频风格轮动研究。
+# 默认候选池只有固定核心币，因此产物会标记为 PILOT；只有补齐点时合约目录和下架合约
+# 历史后，才可同时把下面两个审计开关设为 true。
+bar: 4H
+history_days: 1500
+workers: 4
+source_report_id: null
+
+universe:
+  size: 30
+  minimum_listing_age_days: 365
+  liquidity_lookback_days: 30
+  minimum_coverage: 0.90
+  includes_delisted: false
+  point_in_time_catalogue: false
+  instruments:
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
+    - SOL-USDT-SWAP
+    - XRP-USDT-SWAP
+    - DOGE-USDT-SWAP
+    - ADA-USDT-SWAP
+    - LTC-USDT-SWAP
+    - BCH-USDT-SWAP
+    - LINK-USDT-SWAP
+    - DOT-USDT-SWAP
+    - AVAX-USDT-SWAP
+    - TRX-USDT-SWAP
+
+candidate_windows_weeks: [4, 8, 12]
+fee_bps_per_side: [2, 5, 10]
+primary_fee_bps_per_side: 5
+market_state_resource: crypto/okx/trading_statistics/1D/market_state.parquet
+long_short_fraction: 0.30
+bootstrap_samples: 2000
+bootstrap_block_weeks: 4
+seed: 42
+
+splits:
+  development: [2023-07-01, 2024-06-30]
+  validation: [2024-07-01, 2025-06-30]
+  test: [2025-07-01, 2026-06-30]
+  monitoring: [2026-07-01, null]

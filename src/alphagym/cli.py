@@ -46,6 +46,163 @@ def _root(value: str | None) -> Path:
     return resolve_root(value)
 
 
+def _cmd_hf(args):
+    from alphagym.hf_book import build_samples
+    from alphagym.hf_factors import factor_catalog
+    from alphagym.hf_research import run_research
+
+    if args.hf_command == 'list':
+        result = {'ok': True, 'factors': factor_catalog()}
+    elif args.hf_command == 'build':
+        result = build_samples(args.root, start=args.start, end=args.end)
+    elif args.hf_command == 'run':
+        result = run_research(args.root, args.spec)
+    elif args.hf_command in {'pipeline', 'execute-pipeline', 'combine', 'execute-ml', 'status'}:
+        from alphagym.hf_jobs import (
+            execute_ml,
+            execute_pipeline,
+            read_job,
+            start_ml,
+            start_pipeline,
+        )
+
+        if args.hf_command == 'status':
+            result = read_job(args.root, args.job_id)
+        elif args.hf_command == 'execute-pipeline':
+            result = execute_pipeline(args.root, args.spec, args.job_id)
+        elif args.hf_command == 'execute-ml':
+            result = execute_ml(args.root, args.spec, args.job_id)
+        elif args.hf_command == 'combine' and args.background:
+            result = start_ml(args.root, args.spec)
+        elif args.hf_command == 'combine':
+            job = start_ml(args.root, args.spec, spawn=False)
+            result = execute_ml(args.root, args.spec, job['job_id'])
+        elif args.background:
+            result = start_pipeline(args.root, args.spec)
+        else:
+            job = start_pipeline(args.root, args.spec, spawn=False)
+            result = execute_pipeline(args.root, args.spec, job['job_id'])
+    elif args.hf_command in {'live', 'execute-live', 'live-status', 'live-log'}:
+        from alphagym.hf_live import execute_live, read_live_log, read_live_status, start_live
+
+        if args.hf_command == 'live-status':
+            result = read_live_status(args.root, args.session_id)
+        elif args.hf_command == 'live-log':
+            result = read_live_log(args.root, args.session_id, args.limit)
+        elif args.hf_command == 'execute-live':
+            result = execute_live(
+                args.root, args.report_id, horizon=args.horizon,
+                duration_minutes=args.duration_minutes, execute_demo=args.execute_demo,
+                session_id=args.session_id, allow_short=args.allow_short,
+                instrument_id=args.instrument_id, min_edge_bps=args.min_edge_bps)
+        else:
+            result = start_live(
+                args.root, args.report_id, horizon=args.horizon,
+                duration_minutes=args.duration_minutes, execute_demo=args.execute_demo,
+                allow_short=args.allow_short, instrument_id=args.instrument_id,
+                min_edge_bps=args.min_edge_bps)
+    else:
+        import re
+
+        if not re.fullmatch(r'hf(?:ml)?-[a-f0-9]{16}', args.report_id):
+            raise ValueError('Invalid high-frequency report ID')
+        source = _root(args.root)/'factor_library'/'reports'/args.report_id
+        if args.hf_command == 'show':
+            result = json.loads(storage_io.read_text(source/'manifest.json'))
+        else:
+            destination = Path(args.output).resolve()
+            paths = []
+            standard = ('report.html', 'report.md', 'manifest.json', 'spec.yaml', 'summary.csv',
+                        'daily.parquet')
+            extra = (('predictions.parquet', 'importance.parquet')
+                     if args.report_id.startswith('hfml-')
+                     else ('features.parquet', 'correlation.parquet'))
+            for name in standard+extra:
+                target = destination/name
+                storage_io.export_resource(source/name, target)
+                paths.append(str(target))
+            result = {'ok': True, 'files': paths}
+    _emit(args, result)
+    return 0
+
+
+def _cmd_crypto_hourly(args):
+    from alphagym.crypto_hourly import (
+        DEFAULT_CORE_UNIVERSE,
+        HourlySpec,
+        reanalyze_hourly_report,
+        run_hourly_research,
+    )
+
+    spec = HourlySpec(
+        bar=args.bar, universe_size=args.universe_size, history_days=args.history_days,
+        horizons=tuple(args.horizon or (1, 2, 6)), fee_bps_per_side=args.fee_bps_per_side,
+        minimum_bars=args.minimum_bars,
+        instruments=tuple(args.instrument) if args.instrument else DEFAULT_CORE_UNIVERSE,
+        workers=args.workers)
+    result = (reanalyze_hourly_report(_root(args.root), args.source_report, spec)
+              if args.source_report else run_hourly_research(_root(args.root), spec))
+    _emit(args, result)
+    return 0
+
+
+def _cmd_crypto_hourly_composite(args):
+    from alphagym.crypto_hourly_composite import CompositeSpec, run_composite_research
+
+    spec = CompositeSpec(
+        source_report_id=args.source_report,
+        horizon_bars=args.horizon_bars,
+        fee_bps_per_side=args.fee_bps_per_side,
+    )
+    _emit(args, run_composite_research(_root(args.root), spec))
+    return 0
+
+
+def _cmd_crypto_style_rotation(args):
+    from alphagym.crypto_style_rotation import load_rotation_spec, run_style_rotation
+
+    spec = load_rotation_spec(args.spec)
+    _emit(args, run_style_rotation(_root(args.root), spec))
+    return 0
+
+
+def _cmd_crypto_trading_statistics(args):
+    from alphagym.crypto_market_state import update_trading_statistics
+
+    result = update_trading_statistics(
+        _root(args.root), currencies=tuple(args.currency or ("BTC", "ETH")),
+        period=args.period,
+    )
+    _emit(args, result)
+    return 0
+
+
+def _cmd_crypto_hourly_paper(args):
+    from alphagym.crypto_hourly_live import (
+        close_demo_portfolio,
+        list_demo_sessions,
+        read_demo_status,
+        start_demo_portfolio,
+        wait_and_close_demo_portfolio,
+    )
+
+    if args.paper_command == 'start':
+        result = start_demo_portfolio(
+            _root(args.root), args.report_id, notional_per_leg=args.notional_per_leg,
+            execute_demo=args.execute_demo)
+    elif args.paper_command == 'close':
+        result = close_demo_portfolio(_root(args.root), args.session_id)
+    elif args.paper_command == 'status':
+        result = read_demo_status(_root(args.root), args.session_id)
+    elif args.paper_command == 'wait-close':
+        result = wait_and_close_demo_portfolio(
+            _root(args.root), args.session_id, poll_seconds=args.poll_seconds)
+    else:
+        result = {'ok': True, 'sessions': list_demo_sessions(_root(args.root))}
+    _emit(args, result)
+    return 0
+
+
 def _emit(args: argparse.Namespace, value: object) -> None:
     if getattr(args, "json", False):
         print(dumps(value))
@@ -93,6 +250,17 @@ def _cmd_import_parquet(args):
     from alphagym.ingest import import_parquet
 
     _emit(args, import_parquet(args.input, args.table, _root(args.root), mode=args.mode))
+    return 0
+
+
+def _cmd_import_okx_orderbook(args):
+    from alphagym.okx_orderbook import import_okx_orderbook
+
+    result = import_okx_orderbook(
+        _root(args.root), inst_id=args.instrument, days=args.days,
+        end_date=args.end, depth=args.depth, chunk_size=args.chunk_size,
+    )
+    _emit(args, result)
     return 0
 
 
@@ -639,6 +807,156 @@ def build_parser() -> argparse.ArgumentParser:
     import_qmt.add_argument("--root")
     import_qmt.add_argument("--no-refresh-factor-cache", action="store_true")
     import_qmt.set_defaults(func=_cmd_import_qmt)
+
+    crypto = commands.add_parser("crypto-data")
+    crypto_commands = crypto.add_subparsers(dest="crypto_data_command", required=True)
+    okx_book = crypto_commands.add_parser("import-okx-orderbook")
+    okx_book.add_argument("--root")
+    okx_book.add_argument("--instrument", default="BTC-USDT")
+    okx_book.add_argument("--days", type=int, default=7)
+    okx_book.add_argument("--end", help="Last UTC archive date; defaults to latest complete day")
+    okx_book.add_argument("--depth", type=int, choices=(400, 5000), default=400)
+    okx_book.add_argument("--chunk-size", type=int, default=50_000)
+    okx_book.set_defaults(func=_cmd_import_okx_orderbook)
+
+    okx_statistics = crypto_commands.add_parser(
+        "import-okx-trading-statistics",
+        help="Persist bounded public OKX positioning and order-flow histories",
+    )
+    okx_statistics.add_argument("--root")
+    okx_statistics.add_argument("--period", choices=("5m", "1H", "1D"), default="1D")
+    okx_statistics.add_argument("--currency", action="append")
+    okx_statistics.set_defaults(func=_cmd_crypto_trading_statistics)
+
+    crypto_research = commands.add_parser(
+        'crypto-hourly', help='Hourly research for liquid crypto perpetual swaps')
+    crypto_research.add_argument('--root')
+    crypto_research.add_argument('--bar', choices=('1H', '2H', '4H'), default='4H')
+    crypto_research.add_argument('--universe-size', type=int, default=20)
+    crypto_research.add_argument('--history-days', type=int, default=365)
+    crypto_research.add_argument('--horizon', type=int, action='append', default=None,
+                                 help='Holding period in bars; repeat for multiple horizons')
+    crypto_research.add_argument('--fee-bps-per-side', type=float, default=5.0)
+    crypto_research.add_argument('--minimum-bars', type=int, default=250)
+    crypto_research.add_argument('--instrument', action='append',
+                                 help='Fixed instrument ID; repeat to define a custom universe')
+    crypto_research.add_argument('--workers', type=int, default=4)
+    crypto_research.add_argument('--source-report',
+                                 help='Reanalyze stored candles without downloading again')
+    crypto_research.set_defaults(func=_cmd_crypto_hourly)
+
+    crypto_composite = commands.add_parser(
+        'crypto-hourly-composite', help='Frozen multi-factor crypto hourly research')
+    crypto_composite.add_argument('--root')
+    crypto_composite.add_argument('--source-report', required=True)
+    crypto_composite.add_argument('--horizon-bars', type=int, default=6)
+    crypto_composite.add_argument('--fee-bps-per-side', type=float, default=5.0)
+    crypto_composite.set_defaults(func=_cmd_crypto_hourly_composite)
+
+    crypto_rotation = commands.add_parser(
+        'crypto-style-rotation', help='Weekly point-in-time crypto style rotation research')
+    crypto_rotation.add_argument('--root')
+    crypto_rotation.add_argument('--spec', required=True)
+    crypto_rotation.set_defaults(func=_cmd_crypto_style_rotation)
+
+    crypto_paper = commands.add_parser('crypto-hourly-paper')
+    crypto_paper_commands = crypto_paper.add_subparsers(dest='paper_command', required=True)
+    crypto_paper_start = crypto_paper_commands.add_parser('start')
+    crypto_paper_start.add_argument('--root')
+    crypto_paper_start.add_argument('--report-id', required=True)
+    crypto_paper_start.add_argument('--notional-per-leg', type=float, default=25.0)
+    crypto_paper_start.add_argument('--execute-demo', action='store_true')
+    crypto_paper_start.set_defaults(func=_cmd_crypto_hourly_paper)
+    crypto_paper_close = crypto_paper_commands.add_parser('close')
+    crypto_paper_close.add_argument('--root')
+    crypto_paper_close.add_argument('--session-id', required=True)
+    crypto_paper_close.set_defaults(func=_cmd_crypto_hourly_paper)
+    crypto_paper_status = crypto_paper_commands.add_parser('status')
+    crypto_paper_status.add_argument('--root')
+    crypto_paper_status.add_argument('--session-id', required=True)
+    crypto_paper_status.set_defaults(func=_cmd_crypto_hourly_paper)
+    crypto_paper_list = crypto_paper_commands.add_parser('list')
+    crypto_paper_list.add_argument('--root')
+    crypto_paper_list.set_defaults(func=_cmd_crypto_hourly_paper)
+    crypto_paper_wait = crypto_paper_commands.add_parser('wait-close')
+    crypto_paper_wait.add_argument('--root')
+    crypto_paper_wait.add_argument('--session-id', required=True)
+    crypto_paper_wait.add_argument('--poll-seconds', type=int, default=60)
+    crypto_paper_wait.set_defaults(func=_cmd_crypto_hourly_paper)
+
+    hf = commands.add_parser('hf', help='Experimental high-frequency factor research')
+    hf_commands = hf.add_subparsers(dest='hf_command', required=True)
+    hf_commands.add_parser('list').set_defaults(func=_cmd_hf)
+    hf_build = hf_commands.add_parser('build')
+    hf_build.add_argument('--root')
+    hf_build.add_argument('--start', required=True)
+    hf_build.add_argument('--end', required=True)
+    hf_build.set_defaults(func=_cmd_hf)
+    hf_run = hf_commands.add_parser('run')
+    hf_run.add_argument('--root')
+    hf_run.add_argument('--spec', required=True)
+    hf_run.set_defaults(func=_cmd_hf)
+    hf_pipeline = hf_commands.add_parser('pipeline')
+    hf_pipeline.add_argument('--root')
+    hf_pipeline.add_argument('--spec', required=True)
+    hf_pipeline.add_argument('--background', action='store_true')
+    hf_pipeline.set_defaults(func=_cmd_hf)
+    hf_execute = hf_commands.add_parser('execute-pipeline', help=argparse.SUPPRESS)
+    hf_execute.add_argument('--root')
+    hf_execute.add_argument('--spec', required=True)
+    hf_execute.add_argument('--job-id', required=True)
+    hf_execute.set_defaults(func=_cmd_hf)
+    hf_status = hf_commands.add_parser('status')
+    hf_status.add_argument('--root')
+    hf_status.add_argument('--job-id', required=True)
+    hf_status.set_defaults(func=_cmd_hf)
+    hf_combine = hf_commands.add_parser('combine')
+    hf_combine.add_argument('--root')
+    hf_combine.add_argument('--spec', required=True)
+    hf_combine.add_argument('--background', action='store_true')
+    hf_combine.set_defaults(func=_cmd_hf)
+    hf_execute_ml = hf_commands.add_parser('execute-ml', help=argparse.SUPPRESS)
+    hf_execute_ml.add_argument('--root')
+    hf_execute_ml.add_argument('--spec', required=True)
+    hf_execute_ml.add_argument('--job-id', required=True)
+    hf_execute_ml.set_defaults(func=_cmd_hf)
+    hf_live = hf_commands.add_parser('live')
+    hf_live.add_argument('--root')
+    hf_live.add_argument('--report-id', required=True)
+    hf_live.add_argument('--horizon', type=int, choices=(1, 5, 30, 60), default=5)
+    hf_live.add_argument('--duration-minutes', type=int, default=60)
+    hf_live.add_argument('--execute-demo', action='store_true')
+    hf_live.add_argument('--allow-short', action='store_true')
+    hf_live.add_argument('--instrument-id', default='BTC-USDT-SWAP')
+    hf_live.add_argument('--min-edge-bps', type=float, default=12.0)
+    hf_live.set_defaults(func=_cmd_hf)
+    hf_live_status = hf_commands.add_parser('live-status')
+    hf_live_status.add_argument('--root')
+    hf_live_status.add_argument('--session-id', required=True)
+    hf_live_status.set_defaults(func=_cmd_hf)
+    hf_live_log = hf_commands.add_parser('live-log')
+    hf_live_log.add_argument('--root')
+    hf_live_log.add_argument('--session-id', required=True)
+    hf_live_log.add_argument('--limit', type=int, default=50)
+    hf_live_log.set_defaults(func=_cmd_hf)
+    hf_execute_live = hf_commands.add_parser('execute-live', help=argparse.SUPPRESS)
+    hf_execute_live.add_argument('--root')
+    hf_execute_live.add_argument('--report-id', required=True)
+    hf_execute_live.add_argument('--horizon', type=int, required=True)
+    hf_execute_live.add_argument('--duration-minutes', type=int, required=True)
+    hf_execute_live.add_argument('--session-id', required=True)
+    hf_execute_live.add_argument('--execute-demo', action='store_true')
+    hf_execute_live.add_argument('--allow-short', action='store_true')
+    hf_execute_live.add_argument('--instrument-id', default='BTC-USDT-SWAP')
+    hf_execute_live.add_argument('--min-edge-bps', type=float, default=12.0)
+    hf_execute_live.set_defaults(func=_cmd_hf)
+    for command in ('show', 'export'):
+        hf_read = hf_commands.add_parser(command)
+        hf_read.add_argument('--root')
+        hf_read.add_argument('--report-id', required=True)
+        if command == 'export':
+            hf_read.add_argument('--output', required=True)
+        hf_read.set_defaults(func=_cmd_hf)
 
     factor = commands.add_parser("factor")
     factor_commands = factor.add_subparsers(dest="factor_command", required=True)

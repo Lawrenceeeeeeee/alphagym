@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}数字货币小时策略 · AlphaGYM{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">CRYPTO PERPETUAL RESEARCH</p><h1>数字货币小时级策略</h1><p>OKX USDT 永续 · 研究报告与模拟盘只读状态</p></div></section>
+<section class="panel"><h2>模拟盘</h2><div class="table-wrap"><table><thead><tr><th>Session</th><th>状态</th><th>策略</th><th>频率 / 持有</th><th>腿数</th><th>开始时间</th><th>计划平仓</th></tr></thead><tbody>
+{% for s in sessions %}<tr><td><a href="/crypto/live/{{ s.session_id }}">{{ s.session_id }}</a></td><td><span class="status {{ s.status }}">{{ s.status }}</span></td><td>{{ s.factor }}{% if s.factor == 'momentum_1' %}（单因子执行验证）{% endif %}</td><td>{{ s.bar }} / {{ s.holding_bars }} 根</td><td>{{ s.filled_legs }}/{{ s.legs }}</td><td>{{ s.started_at|bjt }}</td><td>{{ s.close_due_at|bjt }}</td></tr>{% else %}<tr><td colspan="7">暂无模拟 session</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel"><h2>小时级研究报告</h2><div class="table-wrap"><table><thead><tr><th>报告</th><th>频率</th><th>区间</th><th>币种</th><th>因子</th><th>成本</th><th>创建时间</th></tr></thead><tbody>
+{% for r in reports %}<tr><td>{{ r.report_id }}{% if r.get('report_type') == 'multi_factor' %}<br><small>多因子 · {{ r.get('selected_method', '—') }}</small>{% endif %}</td><td>{{ r.bar }}</td><td>{{ r.start[:10] }} — {{ r.end[:10] }}</td><td>{{ r.universe|length }}</td><td>{{ r.factors|length }}</td><td>{{ r.fee_bps_per_side }} bps/边</td><td>{{ r.created_at|bjt }}</td></tr>{% else %}<tr><td colspan="7">暂无报告</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

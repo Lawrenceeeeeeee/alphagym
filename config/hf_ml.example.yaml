@@ -1,0 +1,15 @@
+source_report_id: hf-eb4119754765843a
+methods:
+  - equal_signed
+  - ic_weighted
+  - ridge
+  - elastic_net
+  - pca_ridge
+  - extra_trees
+  - hist_gbdt
+workers: 8
+seed: 42
+fees_bps_per_side: [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5]
+selection_fee_bps_per_side: 6.0
+trade_edge_quantiles: [0, 0.5, 0.7, 0.8, 0.9, 0.95]
+min_policy_trades: 100

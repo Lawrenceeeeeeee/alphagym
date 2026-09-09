@@ -1,0 +1,12 @@
+# The CLI currently exposes these fields as flags; this file records the formal-run target.
+market: OKX_USDT_LINEAR_SWAP
+bars: [1H, 2H, 4H]
+universe_size: 20
+history_days: 730
+horizons_bars: [1, 2, 6]
+fee_bps_per_side: [2, 5, 10]
+minimum_listing_age_days_before_sample: 365
+splits: [0.6, 0.2, 0.2]
+selection: min_development_validation_sharpe
+test_usage: evaluation_only
+
